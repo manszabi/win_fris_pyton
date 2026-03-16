@@ -52,16 +52,12 @@ def start():
 
 
 def stop():
-    # A futo pythonw processzt allitjuk le
+    # A futo tray.py processzt allitjuk le
     subprocess.run(
-        ["taskkill", "/f", "/im", "pythonw.exe", "/fi", f"WINDOWTITLE eq {TASK_NAME}"],
-        capture_output=True,
-    )
-    # Biztonsagbol a kozvetlen processt is
-    subprocess.run(
-        ["wmic", "process", "where",
-         f"commandline like '%tray.py%'",
-         "delete"],
+        ["powershell", "-Command",
+         "Get-Process -Name python,pythonw -ErrorAction SilentlyContinue | "
+         "Where-Object { $_.CommandLine -like '*tray.py*' } | "
+         "Stop-Process -Force"],
         capture_output=True,
     )
     print("Refresh switcher leallitva.")
