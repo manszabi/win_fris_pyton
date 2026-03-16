@@ -1,4 +1,5 @@
 {
+    "monitor": 1,
     "default_refresh_rate": 120,
     "game_refresh_rate": 300,
     "check_interval": 5,
