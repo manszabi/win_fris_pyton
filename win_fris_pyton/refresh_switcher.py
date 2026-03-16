@@ -42,7 +42,12 @@ def set_refresh_rate(hz):
 
     dm = win32api.EnumDisplaySettings(None, win32con.ENUM_CURRENT_SETTINGS)
     dm.DisplayFrequency = hz
-    dm.Fields = win32con.DM_DISPLAYFREQUENCY
+    dm.Fields = (
+        win32con.DM_PELSWIDTH
+        | win32con.DM_PELSHEIGHT
+        | win32con.DM_BITSPERPEL
+        | win32con.DM_DISPLAYFREQUENCY
+    )
 
     result = win32api.ChangeDisplaySettings(dm, 0)
     if result == win32con.DISP_CHANGE_SUCCESSFUL:

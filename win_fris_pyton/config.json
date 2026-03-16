@@ -1,9 +1,9 @@
 {
-    "default_refresh_rate": 60,
-    "game_refresh_rate": 144,
+    "default_refresh_rate": 120,
+    "game_refresh_rate": 300,
     "check_interval": 5,
     "games": [
-        "cs2.exe",
+        "Diablo IV.exe",
         "valorant.exe",
         "GTA5.exe",
         "RocketLeague.exe"
