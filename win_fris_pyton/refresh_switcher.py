@@ -112,7 +112,7 @@ def find_running_game(games):
     return None
 
 
-def monitor_loop(stop_event=None):
+def monitor_loop(stop_event=None, on_state_change=None):
     config = load_config()
     monitor_number = config.get("monitor", 1)
     default_rate = config["default_refresh_rate"]
@@ -136,6 +136,9 @@ def monitor_loop(stop_event=None):
     logger.info("Alapertelmezett: %d Hz", default_rate)
     for game_name, game_hz in games.items():
         logger.info("  %s -> %d Hz", game_name, game_hz)
+
+    if on_state_change:
+        on_state_change(default_rate, None)
 
     game_was_running = False
 
@@ -161,17 +164,22 @@ def monitor_loop(stop_event=None):
                 logger.info("Jatek elinditva: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
                 set_refresh_rate(game_hz, device)
                 game_was_running = True
+                if on_state_change:
+                    on_state_change(game_hz, game_name)
             elif not result and game_was_running:
                 logger.info("Jatek befejezve -> visszaallas %d Hz-re (monitor %d)", default_rate, monitor_number)
                 set_refresh_rate(default_rate, device)
                 game_was_running = False
+                if on_state_change:
+                    on_state_change(default_rate, None)
             elif result and game_was_running:
-                # Ha masik jatek indul, valtas annak a frekvenciajara
                 game_name, game_hz = result
                 current = get_current_refresh_rate(device)
                 if current != game_hz:
                     logger.info("Jatek valtas: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
                     set_refresh_rate(game_hz, device)
+                    if on_state_change:
+                        on_state_change(game_hz, game_name)
 
         except Exception as e:
             logger.error("Hiba a monitorozas soran: %s", e)

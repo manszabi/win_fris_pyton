@@ -11,7 +11,7 @@ import sys
 
 TASK_NAME = "DisplayRefreshRateSwitcher"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRIPT_PATH = os.path.join(SCRIPT_DIR, "refresh_switcher.py")
+SCRIPT_PATH = os.path.join(SCRIPT_DIR, "tray.py")
 PYTHON_EXE = sys.executable
 LOG_PATH = os.path.join(SCRIPT_DIR, "service.log")
 
@@ -60,7 +60,7 @@ def stop():
     # Biztonsagbol a kozvetlen processt is
     subprocess.run(
         ["wmic", "process", "where",
-         f"commandline like '%refresh_switcher.py%'",
+         f"commandline like '%tray.py%'",
          "delete"],
         capture_output=True,
     )
