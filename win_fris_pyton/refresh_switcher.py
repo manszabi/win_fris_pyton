@@ -99,12 +99,14 @@ def set_refresh_rate(hz, device=None):
         return False
 
 
-def is_any_game_running(games):
-    game_names = {g.lower() for g in games}
+def find_running_game(games):
+    """Megkeresi a futo jatekot es visszaadja (nev, hz) parost, vagy None-t."""
+    game_map = {name.lower(): hz for name, hz in games.items()}
     for proc in psutil.process_iter(["name"]):
         try:
-            if proc.info["name"] and proc.info["name"].lower() in game_names:
-                return proc.info["name"]
+            name = proc.info["name"]
+            if name and name.lower() in game_map:
+                return name, game_map[name.lower()]
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return None
@@ -114,7 +116,6 @@ def monitor_loop(stop_event=None):
     config = load_config()
     monitor_number = config.get("monitor", 1)
     default_rate = config["default_refresh_rate"]
-    game_rate = config["game_refresh_rate"]
     games = config["games"]
     interval = config.get("check_interval", 5)
 
@@ -132,8 +133,9 @@ def monitor_loop(stop_event=None):
         return
 
     logger.info("Kivalasztott monitor: %d (%s)", monitor_number, device)
-    logger.info("Alapertelmezett: %d Hz, Jatekhoz: %d Hz", default_rate, game_rate)
-    logger.info("Figyelt jatekok: %s", games)
+    logger.info("Alapertelmezett: %d Hz", default_rate)
+    for game_name, game_hz in games.items():
+        logger.info("  %s -> %d Hz", game_name, game_hz)
 
     game_was_running = False
 
@@ -145,7 +147,6 @@ def monitor_loop(stop_event=None):
             config = load_config()
             monitor_number = config.get("monitor", 1)
             default_rate = config["default_refresh_rate"]
-            game_rate = config["game_refresh_rate"]
             games = config["games"]
 
             device = get_monitor_device(monitor_number)
@@ -153,16 +154,24 @@ def monitor_loop(stop_event=None):
                 time.sleep(interval)
                 continue
 
-            running_game = is_any_game_running(games)
+            result = find_running_game(games)
 
-            if running_game and not game_was_running:
-                logger.info("Jatek elinditva: %s -> valtas %d Hz-re (monitor %d)", running_game, game_rate, monitor_number)
-                set_refresh_rate(game_rate, device)
+            if result and not game_was_running:
+                game_name, game_hz = result
+                logger.info("Jatek elinditva: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
+                set_refresh_rate(game_hz, device)
                 game_was_running = True
-            elif not running_game and game_was_running:
+            elif not result and game_was_running:
                 logger.info("Jatek befejezve -> visszaallas %d Hz-re (monitor %d)", default_rate, monitor_number)
                 set_refresh_rate(default_rate, device)
                 game_was_running = False
+            elif result and game_was_running:
+                # Ha masik jatek indul, valtas annak a frekvenciajara
+                game_name, game_hz = result
+                current = get_current_refresh_rate(device)
+                if current != game_hz:
+                    logger.info("Jatek valtas: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
+                    set_refresh_rate(game_hz, device)
 
         except Exception as e:
             logger.error("Hiba a monitorozas soran: %s", e)
@@ -187,7 +196,11 @@ if __name__ == "__main__":
         supported = get_supported_refresh_rates(mon)
         marker = " <-- kivalasztva" if idx == monitor_number else ""
         print(f"  Monitor {idx} ({mon}): {rate} Hz (tamogatott: {supported}){marker}")
-    print("Monitorozas indul... (Ctrl+C a kilepeshez)")
+    print(f"\nAlapertelmezett: {config['default_refresh_rate']} Hz")
+    print("Jatekok:")
+    for game_name, game_hz in config["games"].items():
+        print(f"  {game_name} -> {game_hz} Hz")
+    print("\nMonitorozas indul... (Ctrl+C a kilepeshez)")
 
     try:
         monitor_loop()

@@ -1,12 +1,11 @@
 {
     "monitor": 1,
     "default_refresh_rate": 120,
-    "game_refresh_rate": 300,
     "check_interval": 5,
-    "games": [
-        "Diablo IV.exe",
-        "valorant.exe",
-        "GTA5.exe",
-        "RocketLeague.exe"
-    ]
+    "games": {
+        "Diablo IV.exe": 300,
+        "valorant.exe": 240,
+        "GTA5.exe": 144,
+        "RocketLeague.exe": 165
+    }
 }
