@@ -89,7 +89,7 @@ def set_refresh_rate(hz, device=None):
 
     result = win32api.ChangeDisplaySettingsEx(device, dm, 0)
     if result == win32con.DISP_CHANGE_SUCCESSFUL:
-        logger.info("Frissitesi frekvencia beallitva: %d Hz (%s)", hz, device or "primary")
+        logger.debug("Frissitesi frekvencia beallitva: %d Hz (%s)", hz, device or "primary")
         return True
     else:
         logger.error(
@@ -125,17 +125,17 @@ def monitor_loop(stop_event=None, on_state_change=None):
         current = get_current_refresh_rate(mon)
         supported = get_supported_refresh_rates(mon)
         marker = " <-- kivalasztva" if idx == monitor_number else ""
-        logger.info("Monitor %d: %s - %d Hz, tamogatott: %s%s", idx, mon, current, supported, marker)
+        logger.debug("Monitor %d: %s - %d Hz, tamogatott: %s%s", idx, mon, current, supported, marker)
 
     device = get_monitor_device(monitor_number)
     if device is None:
         logger.error("Kilpes: ervenytelen monitor szam.")
         return
 
-    logger.info("Kivalasztott monitor: %d (%s)", monitor_number, device)
-    logger.info("Alapertelmezett: %d Hz", default_rate)
+    logger.debug("Kivalasztott monitor: %d (%s)", monitor_number, device)
+    logger.debug("Alapertelmezett: %d Hz", default_rate)
     for game_name, game_hz in games.items():
-        logger.info("  %s -> %d Hz", game_name, game_hz)
+        logger.debug("  %s -> %d Hz", game_name, game_hz)
 
     if on_state_change:
         on_state_change(default_rate, None)
@@ -161,13 +161,13 @@ def monitor_loop(stop_event=None, on_state_change=None):
 
             if result and not game_was_running:
                 game_name, game_hz = result
-                logger.info("Jatek elinditva: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
+                logger.warning("Jatek elinditva: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
                 set_refresh_rate(game_hz, device)
                 game_was_running = True
                 if on_state_change:
                     on_state_change(game_hz, game_name)
             elif not result and game_was_running:
-                logger.info("Jatek befejezve -> visszaallas %d Hz-re (monitor %d)", default_rate, monitor_number)
+                logger.warning("Jatek befejezve -> visszaallas %d Hz-re (monitor %d)", default_rate, monitor_number)
                 set_refresh_rate(default_rate, device)
                 game_was_running = False
                 if on_state_change:
@@ -176,7 +176,7 @@ def monitor_loop(stop_event=None, on_state_change=None):
                 game_name, game_hz = result
                 current = get_current_refresh_rate(device)
                 if current != game_hz:
-                    logger.info("Jatek valtas: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
+                    logger.warning("Jatek valtas: %s -> valtas %d Hz-re (monitor %d)", game_name, game_hz, monitor_number)
                     set_refresh_rate(game_hz, device)
                     if on_state_change:
                         on_state_change(game_hz, game_name)
