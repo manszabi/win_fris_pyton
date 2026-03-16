@@ -127,3 +127,7 @@ Kiirja az osszes monitor tamogatott frekvenciait.
 ## Logok
 
 A program a `service.log` fajlba logol a projekt mappaban.
+
+- **Maximalis meret:** 500 KB + 1 backup fajl (`service.log.1`), osszesen ~1 MB
+- **Log szint:** WARNING — csak jatek inditasa/leallitasa es hibak kerulnek a logba
+- **Rotacio:** ha eleri az 500 KB-ot, automatikusan atnevezi `.log.1`-re es uj fajlt kezd

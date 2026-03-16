@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import os
 import threading
 
@@ -110,13 +111,14 @@ class TrayApp:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        ],
+    handler = logging.handlers.RotatingFileHandler(
+        LOG_PATH, maxBytes=500_000, backupCount=1, encoding="utf-8",
     )
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    logger = logging.getLogger("RefreshSwitcher")
+    logger.setLevel(logging.WARNING)
+    logger.addHandler(handler)
 
     app = TrayApp()
     app.run()
