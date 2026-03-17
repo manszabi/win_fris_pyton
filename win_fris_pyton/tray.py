@@ -44,7 +44,10 @@ class TrayApp:
             except OSError:
                 font = ImageFont.load_default()
 
-        draw.text((render_size / 2, render_size / 2), text, fill="white", font=font, anchor="mm")
+        cx, cy = render_size / 2, render_size / 2
+        for dx, dy in [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)]:
+            draw.text((cx + dx * 8, cy + dy * 8), text, fill=(0, 0, 0, 180), font=font, anchor="mm")
+        draw.text((cx, cy), text, fill="white", font=font, anchor="mm")
 
         # Lekicsinyites LANCZOS filterrel — eles, antialias-olt eredmeny
         img = img.resize((final_size, final_size), Image.LANCZOS)
