@@ -1,19 +1,21 @@
 import logging
 import logging.handlers
 import os
+import sys
 import threading
 
 from PIL import Image, ImageDraw, ImageFont
 import pystray
 
 from refresh_switcher import (
+    _app_dir,
     get_current_refresh_rate,
     get_monitor_device,
     load_config,
     monitor_loop,
 )
 
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "service.log")
+LOG_PATH = os.path.join(_app_dir(), "service.log")
 
 
 class TrayApp:

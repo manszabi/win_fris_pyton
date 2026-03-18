@@ -1,13 +1,22 @@
 import json
 import logging
 import os
+import sys
 import time
 
 import psutil
 import win32api
 import win32con
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+def _app_dir():
+    """Az exe/script melletti mappa — frozen (PyInstaller) és normál módban is."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+CONFIG_PATH = os.path.join(_app_dir(), "config.json")
 
 logger = logging.getLogger("RefreshSwitcher")
 
