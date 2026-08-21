@@ -47,10 +47,13 @@ SUPERSAMPLE = 8
 #: A munkaszalra varakozas felso hatara kilepeskor (masodperc).
 SHUTDOWN_TIMEOUT = 8.0
 
+#: A ket PIL betutipus-osztaly; az ImageDraw.text() mindkettot elfogadja.
+AnyFont = ImageFont.ImageFont | ImageFont.FreeTypeFont
+
 _FONT_CANDIDATES = ("arialbd.ttf", "seguisb.ttf", "segoeui.ttf", "arial.ttf", "DejaVuSans-Bold.ttf")
 
 
-def _load_font(size: int) -> ImageFont.ImageFont:
+def _load_font(size: int) -> AnyFont:
     for name in _FONT_CANDIDATES:
         try:
             return ImageFont.truetype(name, size)
@@ -90,7 +93,7 @@ def render_icon(text: str, background: tuple[int, int, int, int], size: int) -> 
         )
     draw.text((center, center), text, fill=(255, 255, 255, 255), font=font, anchor="mm")
 
-    return image.resize((size, size), Image.LANCZOS)
+    return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def _open_in_explorer(path: Path) -> None:
@@ -182,7 +185,7 @@ class TrayApp:
             icon.icon = self._icon_for(state)
             icon.title = self._tooltip_for(state)
             icon.update_menu()
-        except Exception:  # noqa: BLE001 - a UI hibaja nem allithatja meg a switchert
+        except Exception:  # a UI hibaja nem allithatja meg a switchert
             logger.warning("Nem sikerult frissiteni a tray ikont.", exc_info=True)
 
     def _on_open_config(self, _icon: object = None, _item: object = None) -> None:

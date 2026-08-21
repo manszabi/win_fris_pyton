@@ -158,3 +158,47 @@ class TestCli:
         from refreshswitcher.cli import build_parser, cmd_tray
 
         assert build_parser().parse_args([]).func is cmd_tray
+
+
+class TestCompatibilityShims:
+    """A regi inditoszkriptek tovabbra is mukodjenek, es *irjanak is ki* valamit.
+
+    Ezek a tesztek azert vannak, mert egy `ruff --fix --unsafe-fixes` futas
+    korabban csendben eltavolitotta az `install_task.py` hasznalati uzenetet:
+    a szkript szo nelkul lepett ki 1-es koddal.
+    """
+
+    @staticmethod
+    def _load(name: str):
+        import importlib.util
+        import sys
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent.parent / name
+        assert path.is_file(), f"hianyzo inditoszkript: {path}"
+        spec = importlib.util.spec_from_file_location(f"_shim_{name.replace('.', '_')}", path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def test_install_task_prints_usage_without_arguments(self, capsys):
+        module = self._load("install_task.py")
+        assert module.run([]) == 1
+        assert "Hasznalat" in capsys.readouterr().err
+
+    def test_install_task_prints_usage_for_an_unknown_command(self, capsys):
+        module = self._load("install_task.py")
+        assert module.run(["nincs-ilyen"]) == 1
+        assert "install" in capsys.readouterr().err
+
+    def test_install_task_forwards_known_commands(self, monkeypatch):
+        module = self._load("install_task.py")
+        seen: list[list[str]] = []
+        monkeypatch.setattr(module, "main", lambda argv: seen.append(argv) or 0)
+        assert module.run(["INSTALL"]) == 0
+        assert seen == [["install"]]
+
+    def test_every_shim_exposes_the_cli_entry_point(self):
+        for name in ("tray.py", "install_task.py", "refresh_switcher.py"):
+            assert callable(self._load(name).main), name

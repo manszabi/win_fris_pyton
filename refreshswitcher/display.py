@@ -123,21 +123,30 @@ def enumerate_monitors() -> list[Monitor]:
     return monitors
 
 
-def resolve_monitor(selector: int | str) -> Monitor | None:
-    """Monitor feloldasa sorszam (1-tol) vagy eszkoznev/nev-toredek alapjan."""
+def describe_monitors() -> str:
+    """A csatolt monitorok rovid, egysoros felsorolasa hibauzenetekhez."""
     monitors = enumerate_monitors()
     if not monitors:
-        logger.error("Nem talalhato az asztalhoz csatolt monitor.")
+        return "nincs csatolt monitor"
+    return "; ".join(str(monitor) for monitor in monitors)
+
+
+def resolve_monitor(selector: int | str) -> Monitor | None:
+    """Monitor feloldasa sorszam (1-tol) vagy eszkoznev/nev-toredek alapjan.
+
+    Sikertelenseg eseten csak ``debug`` szinten naploz: a hivo dolga eldonteni,
+    hogy ez hiba-e. A figyelociklus masodpercenkent hivja, ezert egy kihuzott
+    kijelzo kulonben oraszamra spammelne a naplot.
+    """
+    monitors = enumerate_monitors()
+    if not monitors:
+        logger.debug("Nem talalhato az asztalhoz csatolt monitor.")
         return None
 
     if isinstance(selector, int):
         if 1 <= selector <= len(monitors):
             return monitors[selector - 1]
-        logger.error(
-            "A(z) %d. monitor nem letezik. Elerheto: %s",
-            selector,
-            ", ".join(str(m) for m in monitors),
-        )
+        logger.debug("A(z) %d. monitor nem letezik.", selector)
         return None
 
     needle = selector.strip().lower()
@@ -147,11 +156,7 @@ def resolve_monitor(selector: int | str) -> Monitor | None:
     for monitor in monitors:
         if needle in monitor.friendly_name.lower():
             return monitor
-    logger.error(
-        "Nincs %r nevu monitor. Elerheto: %s",
-        selector,
-        ", ".join(str(m) for m in monitors),
-    )
+    logger.debug("Nincs %r nevu monitor.", selector)
     return None
 
 

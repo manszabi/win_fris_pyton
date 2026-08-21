@@ -1,0 +1,11 @@
+# Fejlesztoi fuggosegek. Telepites: pip install -r requirements-dev.txt
+#
+# A linter/tipusellenorzo verziok PONTOSAN rogzitettek. Ezek uj kiadasai uj
+# szabalyokat vezetnek be es valtoztatnak a meglevoken, ezert egy lebego verzio
+# eltorne a CI-t egy olyan repoban is, amihez senki nem nyult hozza. Frissitesuk
+# tudatos, kulon commit legyen.
+-r requirements.txt
+pytest==9.1.1
+ruff==0.16.4
+mypy==2.3.1
+pyinstaller==6.22.2

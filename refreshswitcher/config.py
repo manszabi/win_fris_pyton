@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -224,13 +223,21 @@ class Config:
 class ConfigWatcher:
     """Igeny szerint ujratolti a configot, es hiba eseten megtartja az utolso jot.
 
-    A fajlt csak akkor olvassa be ujra, ha a merete vagy a modositasi ideje
-    valtozott, igy a masodpercenkenti ellenorzes nem general folyamatos I/O-t.
+    A valtozast a fajl *tartalma* donti el, nem a modositasi ideje es a merete.
+    Az idobelyeg-alapu osszehasonlitas ket okbol is megbizhatatlan: azonos
+    hosszu szerkesztes (pl. ``240`` helyett ``144``) nem valtoztat a mereten, a
+    fajlrendszerek idobelyeg-felbontasa pedig durva lehet (NTFS-en a frissites
+    kesleltetett, exFAT-on 2 masodperc) -- igy egy valodi szerkesztes
+    eszreveletlen maradhatna.
+
+    A parse es a validalas tovabbra is csak tenyleges valtozaskor fut, es a
+    config.json nehany szaz bajt: masodpercenkenti beolvasasa a lapkeszlet-
+    gyorsitotarbol elhanyagolhato koltseg.
     """
 
     def __init__(self, path: Path, *, fallback: Config | None = None) -> None:
         self._path = path
-        self._stamp: tuple[int, int] | None = None
+        self._raw: bytes | None = None
         self._current: Config | None = fallback
         self._last_error: str | None = None
         #: Minden sikeres betoltessel no -- igy az olvasok olcson eszlelik a valtozast.
@@ -250,17 +257,16 @@ class ConfigWatcher:
         """Az utolso ervenyes beallitas, vagy ``None``, ha meg egy sem toltodott be."""
         return self._current
 
-    def _stat_stamp(self) -> tuple[int, int] | None:
+    def _read_bytes(self) -> bytes | None:
         try:
-            st = os.stat(self._path)
+            return self._path.read_bytes()
         except OSError:
             return None
-        return (st.st_mtime_ns, st.st_size)
 
     def reload_if_changed(self) -> Config | None:
         """Ujratolt, ha a fajl valtozott. Mindig az aktualis (vagy utolso jo) configot adja."""
-        stamp = self._stat_stamp()
-        if stamp is not None and stamp == self._stamp and self._current is not None:
+        raw = self._read_bytes()
+        if raw is not None and raw == self._raw and self._current is not None:
             return self._current
 
         try:
@@ -274,11 +280,11 @@ class ConfigWatcher:
                     logger.error("Konfiguracios hiba: %s", message)
                 else:
                     logger.error("Konfiguracios hiba, a korabbi beallitas marad ervenyben: %s", message)
-            # A belyeget nem frissitjuk: felig kiirt fajl eseten a kovetkezo
-            # korben ujra probalkozunk.
+            # A tartalmat nem jegyezzuk meg: felig kiirt fajl eseten a
+            # kovetkezo korben ujra probalkozunk.
             return self._current
 
-        self._stamp = stamp
+        self._raw = raw
         self._generation += 1
         if self._last_error is not None:
             logger.warning("A konfiguracio ujra ervenyes, ujratoltve: %s", self._path)

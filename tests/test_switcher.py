@@ -359,3 +359,23 @@ def win32_calls(switcher):
     import refreshswitcher.display as display_module
 
     return display_module.win32api.change_calls
+
+
+def test_unplug_error_lists_the_available_monitors(make_switcher, displays):
+    """A felhasznalo ebbol latja, mire kell atirnia a configot."""
+    switcher, states = make_switcher(monitor=2)
+    switcher._tick()
+    displays.pop()
+    switcher._tick()
+    assert "Fo monitor" in states[-1].error
+
+
+def test_unplugged_monitor_does_not_spam_the_log(make_switcher, displays, caplog):
+    """Egy ejszakan at kihuzott kijelzo nem irhatja tele a naplot."""
+    switcher, _ = make_switcher(monitor=2)
+    displays.pop()
+    with caplog.at_level("WARNING", logger="refreshswitcher"):
+        for _ in range(20):
+            switcher._tick()
+    errors = [r for r in caplog.records if r.levelname in {"ERROR", "WARNING"}]
+    assert len(errors) <= 2, f"tul sok naplobejegyzes: {[r.message for r in errors]}"

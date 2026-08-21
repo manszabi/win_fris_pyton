@@ -28,7 +28,7 @@ telepitesnel jelold be az **"Add Python to PATH"** opciot.
 
 ```bash
 git clone https://github.com/manszabi/win_fris_pyton.git
-cd win_fris_pyton/win_fris_pyton
+cd win_fris_pyton
 pip install -r requirements.txt
 ```
 

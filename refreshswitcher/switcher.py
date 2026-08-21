@@ -33,6 +33,7 @@ from .display import (
     Monitor,
     RefreshRateCache,
     current_mode,
+    describe_monitors,
     resolve_monitor,
     set_refresh_rate,
 )
@@ -162,9 +163,12 @@ class RefreshSwitcher:
         monitor = resolve_monitor(config.monitor)
         if monitor is None:
             # Tipikus ok: futas kozben kihuzott kijelzo.
+            # Az elerheto monitorok felsorolasa a leghasznosabb resz a
+            # felhasznalonak: ebbol latja, mire kell atirnia a configot.
             return self._handle_failure(
                 config,
-                f"A(z) {config.monitor!r} monitor nem talalhato (kihuztad, vagy elaludt a kijelzo?)",
+                f"A(z) {config.monitor!r} monitor nem talalhato "
+                f"(kihuztad, vagy elaludt a kijelzo?). Elerheto: {describe_monitors()}",
             )
 
         self._check_monitor_identity(monitor, config)

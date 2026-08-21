@@ -16,10 +16,6 @@ jobs:
         os: [windows-latest, ubuntu-latest]
         python-version: ["3.10", "3.12", "3.13"]
 
-    defaults:
-      run:
-        working-directory: win_fris_pyton
-
     steps:
       - uses: actions/checkout@v4
 
@@ -27,23 +23,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: requirements-dev.txt
 
       - name: Fuggosegek telepitese
+        # A linter/tipusellenorzo verziok rogzitettek a requirements-dev.txt-ben,
+        # hogy egy uj kiadasuk ne torje el a CI-t valtozatlan kodbazison.
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: python -m ruff check .
 
       - name: Formazas ellenorzese (ruff format)
-        run: ruff format --check .
+        run: python -m ruff format --check .
 
       - name: Tipusellenorzes (mypy)
-        run: mypy
+        run: python -m mypy
 
       - name: Tesztek (pytest)
-        run: pytest -q
+        run: python -m pytest -q
 
       - name: Konfiguracio ervenyessege
         run: python -m refreshswitcher check
@@ -52,23 +51,29 @@ jobs:
     name: Windows exe build
     needs: check
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: win_fris_pyton
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: |
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Fuggosegek telepitese
+        run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller
-      - run: python -m PyInstaller --noconfirm --clean RefreshSwitcher.spec
-      - run: copy config.json dist\config.json
+          python -m pip install -r requirements-dev.txt
+
+      - name: Exe forditasa
+        run: python -m PyInstaller --noconfirm --clean RefreshSwitcher.spec
+
+      - name: Alapertelmezett config a dist melle
+        run: Copy-Item config.json dist/config.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: RefreshSwitcher-windows
           path: |
-            win_fris_pyton/dist/RefreshSwitcher.exe
-            win_fris_pyton/dist/config.json
+            dist/RefreshSwitcher.exe
+            dist/config.json
