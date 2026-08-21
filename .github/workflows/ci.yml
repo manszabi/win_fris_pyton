@@ -6,10 +6,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Egy agon egyszerre egy futas eleg: az uj push leallitja a korabbit. Ez egy
+# beragadt futast is felszabadit, nem kell megvarni az idokorlatot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    # Az ellenorzesek egy percen belul lefutnak; a korlat egy beragadt teszt
+    # ellen szol (a GitHub alapertelmezese 6 ora lenne).
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +60,7 @@ jobs:
     name: Windows exe build
     needs: check
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
