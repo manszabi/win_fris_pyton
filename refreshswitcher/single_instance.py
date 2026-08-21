@@ -42,7 +42,7 @@ class SingleInstance:
         try:
             handle = win32event.CreateMutex(None, True, self._name)
             last_error = win32api.GetLastError()
-        except Exception:  # noqa: BLE001 - a mutex hianya nem vegzetes
+        except Exception:  # a mutex hianya nem vegzetes, csak nincs egypeldany-vedelem
             logger.warning("Nem sikerult letrehozni az egypeldany-mutexet.", exc_info=True)
             self.acquired = True
             return self
