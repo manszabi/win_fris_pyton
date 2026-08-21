@@ -202,3 +202,48 @@ class TestCompatibilityShims:
     def test_every_shim_exposes_the_cli_entry_point(self):
         for name in ("tray.py", "install_task.py", "refresh_switcher.py"):
             assert callable(self._load(name).main), name
+
+
+class TestMissingDependencies:
+    """Venv hasznalata mellett a leggyakoribb hiba a rossz Python valasztasa.
+
+    Ilyenkor a felhasznalonak ertheto uzenetet kell kapnia, nem stacktrace-t.
+    """
+
+    def test_missing_packages_reports_pip_names(self):
+        from refreshswitcher.cli import missing_packages
+
+        assert missing_packages({"json": "json"}) == []
+        assert missing_packages({"nincs_ilyen_modul": "valami-csomag"}) == ["valami-csomag"]
+
+    def test_windows_commands_fail_cleanly_without_pywin32(self, monkeypatch, capsys, tmp_path):
+        from refreshswitcher import cli
+
+        monkeypatch.setattr(cli, "missing_packages", lambda required: ["pywin32"])
+        path = tmp_path / "config.json"
+        path.write_text("{}", encoding="utf-8")
+
+        for command in ("status", "run", "tray"):
+            assert cli.main(["--config", str(path), command]) == cli.EXIT_MISSING_DEPENDENCY
+            err = capsys.readouterr().err
+            assert "pywin32" in err, command
+            assert "telepites.bat" in err, command
+            assert "Traceback" not in err, command
+
+    def test_config_only_commands_work_without_the_extra_packages(self, tmp_path):
+        """A `check` es az eltavolitas nem igenyel kulso csomagot."""
+        from refreshswitcher.cli import main
+
+        path = tmp_path / "config.json"
+        path.write_text('{"default_refresh_rate": 120}', encoding="utf-8")
+        assert main(["--config", str(path), "check"]) == 0
+
+    def test_describe_interpreter_flags_a_virtualenv(self, monkeypatch):
+        from refreshswitcher.cli import describe_interpreter
+
+        monkeypatch.setattr("sys.prefix", "/proj/.venv")
+        monkeypatch.setattr("sys.base_prefix", "/usr")
+        assert "virtualis kornyezet" in describe_interpreter()
+
+        monkeypatch.setattr("sys.prefix", "/usr")
+        assert "virtualis kornyezet" not in describe_interpreter()

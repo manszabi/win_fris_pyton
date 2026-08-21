@@ -19,18 +19,55 @@ frekvenciajat jatekok inditasakor es leallitasakor.
 
 ## Telepites
 
-### 1. Python
+Eloszor telepitsd a **Python 3.10+** verziojat:
+https://www.python.org/downloads/ — telepiteskor jelold be az
+**"Add Python to PATH"** opciot.
 
-Toltsd le a **Python 3.10+** verziojat: https://www.python.org/downloads/ —
-telepitesnel jelold be az **"Add Python to PATH"** opciot.
-
-### 2. Projekt es fuggosegek
+Utana toltsd le a projektet, es **kattints duplan a `telepites.bat` fajlra**.
 
 ```bash
 git clone https://github.com/manszabi/win_fris_pyton.git
 cd win_fris_pyton
-pip install -r requirements.txt
 ```
+
+A `telepites.bat` mindent elintez:
+
+1. **Sajat virtualis kornyezetet keszit** a `.venv` mappaban (csak az elso
+   inditaskor). A csomagok igy nem a rendszer Pythonjaba kerulnek, es nem
+   keverednek mas programok csomagjaival.
+2. **Ellenorzi a fuggosegeket**, es csak akkor telepit, ha kell.
+3. **Letrehozza a Task Scheduler feladatot**, es azonnal el is inditja a
+   programot. Minden bejelentkezeskor automatikusan elindul.
+
+**Rendszergazdai jog altalaban nem szukseges.** Ha "Access is denied" hibat
+kapsz, inditsd a `telepites.bat`-ot jobb klikk -> *Futtatas rendszergazdakent*
+modon.
+
+| Parancs | Mit csinal |
+|---------|------------|
+| `telepites.bat` | Telepites vagy javitas (barmikor ujra futtathato) |
+| `telepites.bat frissit` | A csomagok frissitese a legujabb verziora |
+| `telepites.bat admin` | Emelt jogu feladat (adminkent futo jatekok figyelesehez) |
+| `eltavolitas.bat` | Az automatikus inditas kikapcsolasa |
+
+Az `eltavolitas.bat` a `.venv` mappat es a `config.json`-t **nem** torli; ha
+azokat is meg akarod szuntetni, egyszeruen tordold a projekt mappat.
+
+> **A projekt mappajat a telepites utan ne helyezd at.** Az utemezett feladat
+> a `.venv` Pythonjara mutat teljes utvonallal. Ha megis athelyezed, futtasd
+> ujra a `telepites.bat`-ot -- felulirja a feladatot az uj utvonallal.
+
+<details>
+<summary>Telepites kezzel, virtualis kornyezet nelkul</summary>
+
+```bash
+pip install -r requirements.txt
+python -m refreshswitcher install
+```
+
+Ez a rendszer Pythonjaba telepit. Mukodik, de a `telepites.bat` az ajanlott
+ut, mert elkuloniti a csomagokat.
+</details>
 
 | Fuggoseg | Miert kell |
 |----------|------------|
@@ -38,19 +75,6 @@ pip install -r requirements.txt
 | `pywin32` | Windows API (kijelzo beallitasok) |
 | `pystray` | system tray ikon |
 | `Pillow` | ikon kep generalas |
-
-### 3. Automatikus inditas
-
-```bash
-python -m refreshswitcher install
-```
-
-Ez letrehozza a Task Scheduler feladatot es azonnal el is inditja a programot.
-**Rendszergazdai jog altalaban nem szukseges.** Ha a `schtasks` "Access is
-denied" hibat ad, futtasd rendszergazdai parancssorbol.
-
-> Ha adminkent futo jatekokat is figyelni szeretnel, hasznald az
-> `install --elevated` kapcsolot (ehhez mar kell rendszergazdai parancssor).
 
 ## Hasznalat
 
@@ -65,6 +89,11 @@ python -m refreshswitcher start     # inditas
 python -m refreshswitcher stop      # leallitas
 python -m refreshswitcher task-status  # az utemezett feladat allapota
 ```
+
+> **Virtualis kornyezet eseten** a `python` helyett a venv Pythonjat kell
+> hasznalni: `.venv\Scripts\python -m refreshswitcher status`. Ha veletlenul
+> a rendszer Pythonjat hasznalod, a program ezt megmondja, es nem
+> stacktrace-szel all le. A `status` parancs kiirja, melyik Pythont hasznalja.
 
 A regi inditoszkriptek tovabbra is mukodnek (`python tray.py`,
 `python install_task.py install`, `python refresh_switcher.py`).
@@ -127,6 +156,7 @@ es a `"CS2.exe"` ugyanazt jelenti.
 | **A program osszeomlik vagy megszakad** | A frekvenciavaltas *dinamikus* (nem irodik a registrybe), igy egy ujrainditas visszahozza a Windows eredeti beallitasat. |
 | **Nincs `config.json`** | A program **letrehozza** az alapertelmezettet az exe mellett, es elindul. |
 | **A `config.json` hibas (elgepelt JSON)** | A tray ikon **piros** lesz, a tooltip kiirja a hiba helyet (sor/oszlop). A menubol megnyithato a config es a naplo; a javitas utan magatol ujratolt. |
+| **Rossz Pythont hasznalsz (nem a venv-et)** | A program ertheto hibaval all le, es megmondja, melyik csomag hianyzik es melyik Pythont hasznalja -- nem dob stacktrace-t. |
 | **Ket peldany indul el** | A masodik peldany azonnal kilep (nevesitett mutex), igy nem tudnak egymas ellen dolgozni. |
 
 ### Monitor rogzitese nev szerint

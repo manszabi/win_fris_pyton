@@ -126,3 +126,43 @@ def test_access_denied_is_detected():
     result = scheduler.CommandResult(1, "", "ERROR: Access is denied.")
     assert result.access_denied
     assert not scheduler.CommandResult(1, "", "ERROR: egyeb").access_denied
+
+
+class TestVirtualEnvironment:
+    """A ``telepites.bat`` a venv Pythonjaval futtatja az ``install``-t.
+
+    Ez a kulcs-tulajdonsag: mivel a feladat cellpontja a ``sys.executable``-bol
+    szarmazik, az utemezett feladat automatikusan a venv ``pythonw.exe``-jere
+    mutat -- nem a rendszer Pythonjara, aminek nincsenek meg a csomagjai.
+    """
+
+    @staticmethod
+    def _make_venv(tmp_path):
+        scripts = tmp_path / ".venv" / "Scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "python.exe").touch()
+        (scripts / "pythonw.exe").touch()
+        return scripts
+
+    def test_task_points_at_the_venv_interpreter(self, monkeypatch, tmp_path):
+        scripts = self._make_venv(tmp_path)
+        monkeypatch.setattr(scheduler.sys, "frozen", False, raising=False)
+        monkeypatch.setattr(scheduler.sys, "executable", str(scripts / "python.exe"))
+
+        exe, script = scheduler.launch_target()
+        assert exe == str(scripts / "pythonw.exe")
+        assert ".venv" in exe, "az utemezett feladat nem a venv Pythonjara mutat"
+        assert script is not None and script.endswith("tray.py")
+
+    def test_task_command_quotes_a_venv_path_with_spaces(self, monkeypatch, tmp_path):
+        base = tmp_path / "Program Files" / "RefreshSwitcher"
+        scripts = base / ".venv" / "Scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "python.exe").touch()
+        (scripts / "pythonw.exe").touch()
+        monkeypatch.setattr(scheduler.sys, "frozen", False, raising=False)
+        monkeypatch.setattr(scheduler.sys, "executable", str(scripts / "python.exe"))
+
+        command = scheduler._task_command()
+        assert command.startswith(f'"{scripts / "pythonw.exe"}"')
+        assert command.count('"') == 4  # ket idezojelbe tett utvonal

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +27,58 @@ _ALREADY_RUNNING_MESSAGE = (
 )
 
 
+#: Futasidoben szukseges kulso csomagok: import-nev -> pip-nev.
+_RUNTIME_PACKAGES: dict[str, str] = {
+    "psutil": "psutil",
+    "win32api": "pywin32",
+}
+_TRAY_PACKAGES: dict[str, str] = {"pystray": "pystray", "PIL": "Pillow"}
+
+#: Kilepesi kod: hianyzo fuggoseg (2 = hibas config, 3 = mar fut).
+EXIT_MISSING_DEPENDENCY = 4
+
+
+def missing_packages(required: Mapping[str, str]) -> list[str]:
+    """A tenylegesen nem importalhato csomagok pip-nevei.
+
+    Valodi importot vegez, nem csak ``find_spec``-et: a pywin32 telepitve is
+    lehet ugy, hogy a DLL-jei nem toltodnek be.
+    """
+    missing = []
+    for module, package in required.items():
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            missing.append(package)
+    return missing
+
+
+def _report_missing(required: Mapping[str, str]) -> int | None:
+    """Ertheto uzenetet ir ki hianyzo fuggoseg eseten; kulonben ``None``."""
+    missing = missing_packages(required)
+    if not missing:
+        return None
+    print(f"HIBA: hianyzo csomag(ok): {', '.join(missing)}", file=sys.stderr)
+    print(file=sys.stderr)
+    print(f"A hasznalt Python: {describe_interpreter()}", file=sys.stderr)
+    print(
+        "Valoszinuleg nem a virtualis kornyezet Pythonjat hasznalod.\n"
+        "Futtasd a telepites.bat fajlt, vagy telepitsd kezzel:\n"
+        "    pip install -r requirements.txt",
+        file=sys.stderr,
+    )
+    return EXIT_MISSING_DEPENDENCY
+
+
+def describe_interpreter() -> str:
+    """Melyik Python futtatja a programot -- venv eseten ezt szoktak keresni."""
+    if getattr(sys, "frozen", False):
+        return f"{sys.executable} (beagyazott, PyInstaller)"
+    # A venv-ben a prefix elter a base_prefix-tol; ez a hivatalos detektalas.
+    suffix = " (virtualis kornyezet)" if sys.prefix != sys.base_prefix else ""
+    return f"{sys.executable}{suffix}"
+
+
 def _load_config(path: Path) -> Config | None:
     try:
         return Config.load(path)
@@ -37,6 +91,10 @@ def _load_config(path: Path) -> Config | None:
 
 
 def cmd_tray(args: argparse.Namespace) -> int:
+    code = _report_missing({**_RUNTIME_PACKAGES, **_TRAY_PACKAGES})
+    if code is not None:
+        return code
+
     from .tray import run_tray
 
     config_file = args.config or config_path()
@@ -60,6 +118,10 @@ def cmd_tray(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Tray nelkuli, konzolos futtatas - hibakeresehez."""
+    code = _report_missing(_RUNTIME_PACKAGES)
+    if code is not None:
+        return code
+
     from .switcher import RefreshSwitcher
 
     config_file = args.config or config_path()
@@ -85,6 +147,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Kiirja a monitorokat, a tamogatott frekvenciakat es az aktualis beallitast."""
+    code = _report_missing(_RUNTIME_PACKAGES)
+    if code is not None:
+        return code
+
     from .display import current_mode, enumerate_monitors, resolve_monitor, supported_refresh_rates
 
     setup_logging(logging.DEBUG if args.verbose else logging.WARNING, console=True)
@@ -93,6 +159,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print(f"RefreshSwitcher {__version__}")
     print(f"Konfiguracio: {config_file}")
+    print(f"Python:       {describe_interpreter()}")
     print()
 
     monitors = enumerate_monitors()

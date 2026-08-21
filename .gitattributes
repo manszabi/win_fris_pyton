@@ -1,0 +1,5 @@
+# A .bat fajlok CRLF sorvegeket igenyelnek: LF eseten a cmd.exe
+# elgepelheti a goto/label feldolgozast.
+*.bat text eol=crlf
+*.py  text eol=lf
+*.md  text eol=lf
