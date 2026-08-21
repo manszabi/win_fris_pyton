@@ -34,7 +34,9 @@ _RUNTIME_PACKAGES: dict[str, str] = {
 }
 _TRAY_PACKAGES: dict[str, str] = {"pystray": "pystray", "PIL": "Pillow"}
 
-#: Kilepesi kod: hianyzo fuggoseg (2 = hibas config, 3 = mar fut).
+#: Kilepesi kodok.
+EXIT_INVALID_CONFIG = 2
+EXIT_ALREADY_RUNNING = 3
 EXIT_MISSING_DEPENDENCY = 4
 
 
@@ -43,29 +45,59 @@ def missing_packages(required: Mapping[str, str]) -> list[str]:
 
     Valodi importot vegez, nem csak ``find_spec``-et: a pywin32 telepitve is
     lehet ugy, hogy a DLL-jei nem toltodnek be.
+
+    Minden kivetelt hianynak tekintunk, nem csak az ``ImportError``-t: egy
+    csomag lehet telepitve ugy is, hogy az importja mas hibaval szall el
+    (a pywin32 DLL-betoltesi hibaja pontosan ilyen). Ha ezt nem kapnank el,
+    a kivetel a hasznalhato hibauzenet helyett kiszallna a programbol.
     """
     missing = []
     for module, package in required.items():
         try:
             importlib.import_module(module)
-        except ImportError:
+        except Exception:  # noqa: BLE001 - lasd a docstringet
             missing.append(package)
     return missing
 
 
-def _report_missing(required: Mapping[str, str]) -> int | None:
+def report_error(message: str, *, popup: bool = False) -> None:
+    """Hibauzenet a konzolra, a naploba, es -- konzol hianyaban -- ablakban.
+
+    ``pythonw.exe`` alatt a ``sys.stdout``/``sys.stderr`` ``None``, ilyenkor a
+    ``print`` csendben eldobja az uzenetet. Enelkul egy indulasi hiba teljesen
+    lathatatlan: a program kilep, es a felhasznalo semmit nem lat.
+    """
+    logger.error("%s", message.replace("\n", " | "))
+    print(message, file=sys.stderr)
+    if popup and sys.stderr is None and sys.platform == "win32":
+        _message_box(message)
+
+
+def _message_box(message: str) -> None:
+    """Egyszeru Windows uzenetablak; hiba eseten csendben kihagyja."""
+    try:
+        import ctypes
+
+        MB_ICONERROR = 0x10
+        ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
+            None, message, "RefreshSwitcher", MB_ICONERROR
+        )
+    except Exception:  # az ablak hianya nem vegzetes
+        logger.debug("Nem sikerult uzenetablakot megjeleniteni.", exc_info=True)
+
+
+def _report_missing(required: Mapping[str, str], *, popup: bool = False) -> int | None:
     """Ertheto uzenetet ir ki hianyzo fuggoseg eseten; kulonben ``None``."""
     missing = missing_packages(required)
     if not missing:
         return None
-    print(f"HIBA: hianyzo csomag(ok): {', '.join(missing)}", file=sys.stderr)
-    print(file=sys.stderr)
-    print(f"A hasznalt Python: {describe_interpreter()}", file=sys.stderr)
-    print(
+    report_error(
+        f"HIBA: hianyzo csomag(ok): {', '.join(missing)}\n\n"
+        f"A hasznalt Python: {describe_interpreter()}\n"
         "Valoszinuleg nem a virtualis kornyezet Pythonjat hasznalod.\n"
         "Futtasd a telepites.bat fajlt, vagy telepitsd kezzel:\n"
         "    pip install -r requirements.txt",
-        file=sys.stderr,
+        popup=popup,
     )
     return EXIT_MISSING_DEPENDENCY
 
@@ -83,7 +115,7 @@ def _load_config(path: Path) -> Config | None:
     try:
         return Config.load(path)
     except ConfigError as exc:
-        print(f"HIBA: {exc}", file=sys.stderr)
+        report_error(f"HIBA: {exc}")
         return None
 
 
@@ -91,15 +123,21 @@ def _load_config(path: Path) -> Config | None:
 
 
 def cmd_tray(args: argparse.Namespace) -> int:
-    code = _report_missing({**_RUNTIME_PACKAGES, **_TRAY_PACKAGES})
+    # A naplozas MINDEN mas elott indul. pythonw.exe alatt nincs konzol, ezert
+    # az ezt megelozoen keletkezo hiba nyomtalanul elveszne -- pontosan ez adta
+    # a "duplan kattintottam, nem tortent semmi" tunetet.
+    config_file = args.config or config_path()
+    write_default_config(config_file)
+    setup_logging(logging.WARNING, console=args.verbose)
+
+    code = _report_missing({**_RUNTIME_PACKAGES, **_TRAY_PACKAGES}, popup=True)
     if code is not None:
         return code
 
     from .tray import run_tray
 
-    config_file = args.config or config_path()
-    write_default_config(config_file)
     config = _load_config(config_file)
+    # A vegleges naploszint mar a configbol jon (a hivas idempotens).
     setup_logging(config.log_level if config else logging.WARNING, console=args.verbose)
 
     # Hibas config eseten is elindulunk: a tray ikon pirosra valt, es a
@@ -112,7 +150,7 @@ def cmd_tray(args: argparse.Namespace) -> int:
         if not guard.acquired:
             logger.warning("Mar fut egy peldany, ez a folyamat kilep.")
             print(_ALREADY_RUNNING_MESSAGE, file=sys.stderr)
-            return 3
+            return EXIT_ALREADY_RUNNING
         return run_tray(config_file)
 
 
@@ -128,12 +166,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     config = _load_config(config_file)
     setup_logging(logging.DEBUG if args.verbose else (config.log_level if config else "INFO"), console=True)
     if config is None:
-        return 2
+        return EXIT_INVALID_CONFIG
 
     with SingleInstance() as guard:
         if not guard.acquired:
             print(_ALREADY_RUNNING_MESSAGE, file=sys.stderr)
-            return 3
+            return EXIT_ALREADY_RUNNING
 
         switcher = RefreshSwitcher(ConfigWatcher(config_file, fallback=config))
         print(f"Figyeles indul. Config: {config_file}  (Ctrl+C a kilepeshez)")
@@ -184,7 +222,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"      {detail}")
 
     if config is None:
-        return 2
+        return EXIT_INVALID_CONFIG
 
     print()
     print(f"Alapertelmezett frekvencia: {config.default_refresh_rate} Hz")
@@ -202,7 +240,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     config_file = args.config or config_path()
     config = _load_config(config_file)
     if config is None:
-        return 2
+        return EXIT_INVALID_CONFIG
     print(f"A konfiguracio ervenyes: {config_file}")
     print(
         f"  monitor={config.monitor!r}, default={config.default_refresh_rate} Hz, "

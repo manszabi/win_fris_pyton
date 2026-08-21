@@ -247,3 +247,57 @@ class TestMissingDependencies:
 
         monkeypatch.setattr("sys.prefix", "/usr")
         assert "virtualis kornyezet" not in describe_interpreter()
+
+
+class TestSilentStartupFailures:
+    """pythonw.exe alatt nincs konzol -- az indulasi hiba nem veszhet el.
+
+    A `print` ilyenkor csendben eldobja az uzenetet (a CPython no-opol, ha a
+    stream None), ezert a naplo az egyetlen nyom. Korabban a fuggoseg-ellenorzes
+    a naplozas beallitasa ELOTT futott, igy a hiba semmilyen nyomot nem hagyott.
+    """
+
+    def test_dependency_failure_is_logged_even_without_a_console(
+        self, isolated_logging, tmp_path, monkeypatch
+    ):
+        import logging as _logging
+
+        from refreshswitcher import cli
+
+        monkeypatch.setattr(cli, "missing_packages", lambda required: ["pywin32"])
+        monkeypatch.setattr(cli.sys, "stdout", None)
+        monkeypatch.setattr(cli.sys, "stderr", None)
+
+        config = tmp_path / "config.json"
+        config.write_text('{"default_refresh_rate": 120}', encoding="utf-8")
+
+        assert cli.main(["--config", str(config), "tray"]) == cli.EXIT_MISSING_DEPENDENCY
+
+        for handler in _logging.getLogger("refreshswitcher").handlers:
+            handler.flush()
+        log = isolated_logging.current_log_file()
+        assert log is not None and log.exists(), "nem keletkezett naplofajl"
+        content = log.read_text(encoding="utf-8")
+        assert "pywin32" in content, "a hianyzo csomag nem kerult a naploba"
+
+    def test_print_to_a_none_stream_does_not_raise(self, monkeypatch):
+        """A CPython print no-opol None stream eseten -- erre epitunk."""
+        from refreshswitcher import cli
+
+        monkeypatch.setattr(cli.sys, "stdout", None)
+        monkeypatch.setattr(cli.sys, "stderr", None)
+        cli.report_error("proba")  # nem dobhat
+
+    def test_missing_packages_treats_any_import_failure_as_missing(self, monkeypatch):
+        """A pywin32 telepitve is lehet ugy, hogy a DLL-jei nem toltodnek be.
+
+        Az ilyen import nem ``ImportError``-t dob; ha nem kapnank el, a
+        kivetel a hasznalhato hibauzenet helyett kiszallna a programbol.
+        """
+        from refreshswitcher import cli
+
+        def _explode(name):
+            raise RuntimeError("DLL load failed")
+
+        monkeypatch.setattr(cli.importlib, "import_module", _explode)
+        assert cli.missing_packages({"win32api": "pywin32"}) == ["pywin32"]
