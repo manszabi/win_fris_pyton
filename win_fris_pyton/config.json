@@ -2,6 +2,9 @@
     "monitor": 1,
     "default_refresh_rate": 120,
     "check_interval": 5,
+    "enforce_default": true,
+    "restore_on_exit": true,
+    "log_level": "WARNING",
     "games": {
         "Diablo IV.exe": 300,
         "valorant.exe": 240,

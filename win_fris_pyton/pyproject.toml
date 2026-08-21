@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refreshswitcher"
+version = "2.0.0"
+description = "Automatikus kijelzo-frissitesifrekvencia valtas jatekokhoz Windows 11-en"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "ManSzabi" }]
+keywords = ["windows", "display", "refresh-rate", "gaming", "tray"]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "psutil>=5.9",
+    "pystray>=0.19.5",
+    "Pillow>=10.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "pyinstaller>=6.6"]
+
+[project.scripts]
+refreshswitcher = "refreshswitcher.cli:main"
+
+[project.gui-scripts]
+refreshswitcher-tray = "refreshswitcher.cli:main"
+
+[tool.setuptools]
+packages = ["refreshswitcher"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF", "PL", "BLE", "S", "A", "T20"]
+ignore = [
+    "PLR0912",  # a fociklus agai szandekosan explicitek
+    "PLR2004",  # a Win32 varazsszamok helyben olvashatobbak
+    "PLC0415",  # a Windows-fuggo importok szandekosan lustak (lasd cli.py)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004", "B011", "S101", "SLF001"]
+"refreshswitcher/cli.py" = ["T201"]        # a CLI szandekosan a stdout-ra ir
+"refreshswitcher/logging_setup.py" = ["PLW0603"]  # modul-szintu naplozas-szingleton
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+files = ["refreshswitcher"]
