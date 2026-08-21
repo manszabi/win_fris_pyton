@@ -60,33 +60,24 @@ def missing_packages(required: Mapping[str, str]) -> list[str]:
     return missing
 
 
-def report_error(message: str, *, popup: bool = False) -> None:
-    """Hibauzenet a konzolra, a naploba, es -- konzol hianyaban -- ablakban.
+def report_error(message: str) -> None:
+    """Hibauzenet a naploba es -- ha van hova -- a konzolra.
 
     ``pythonw.exe`` alatt a ``sys.stdout``/``sys.stderr`` ``None``, ilyenkor a
-    ``print`` csendben eldobja az uzenetet. Enelkul egy indulasi hiba teljesen
-    lathatatlan: a program kilep, es a felhasznalo semmit nem lat.
+    ``print`` csendben eldobja az uzenetet (nem dob kivetelt). A naplo ezert az
+    egyetlen megbizhato csatorna: oda mindig irunk.
+
+    Szandekosan NINCS uzenetablak. Egy modalis ``MessageBox`` az indulasi uton
+    hatarozatlan ideig blokkol, ha nincs, aki elfogadja -- nem interaktiv
+    munkamenetben ez pont azt a lathatatlan lefagyast okozza, ami ellen ez a
+    fuggveny keszult. A hianyzo csomagokat a telepites.bat amugy is lathatoan
+    jelzi, meg a telepiteskor.
     """
     logger.error("%s", message.replace("\n", " | "))
     print(message, file=sys.stderr)
-    if popup and sys.stderr is None and sys.platform == "win32":
-        _message_box(message)
 
 
-def _message_box(message: str) -> None:
-    """Egyszeru Windows uzenetablak; hiba eseten csendben kihagyja."""
-    try:
-        import ctypes
-
-        MB_ICONERROR = 0x10
-        ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
-            None, message, "RefreshSwitcher", MB_ICONERROR
-        )
-    except Exception:  # az ablak hianya nem vegzetes
-        logger.debug("Nem sikerult uzenetablakot megjeleniteni.", exc_info=True)
-
-
-def _report_missing(required: Mapping[str, str], *, popup: bool = False) -> int | None:
+def _report_missing(required: Mapping[str, str]) -> int | None:
     """Ertheto uzenetet ir ki hianyzo fuggoseg eseten; kulonben ``None``."""
     missing = missing_packages(required)
     if not missing:
@@ -97,7 +88,6 @@ def _report_missing(required: Mapping[str, str], *, popup: bool = False) -> int 
         "Valoszinuleg nem a virtualis kornyezet Pythonjat hasznalod.\n"
         "Futtasd a telepites.bat fajlt, vagy telepitsd kezzel:\n"
         "    pip install -r requirements.txt",
-        popup=popup,
     )
     return EXIT_MISSING_DEPENDENCY
 
@@ -130,7 +120,7 @@ def cmd_tray(args: argparse.Namespace) -> int:
     write_default_config(config_file)
     setup_logging(logging.WARNING, console=args.verbose)
 
-    code = _report_missing({**_RUNTIME_PACKAGES, **_TRAY_PACKAGES}, popup=True)
+    code = _report_missing({**_RUNTIME_PACKAGES, **_TRAY_PACKAGES})
     if code is not None:
         return code
 

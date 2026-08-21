@@ -280,6 +280,30 @@ class TestSilentStartupFailures:
         content = log.read_text(encoding="utf-8")
         assert "pywin32" in content, "a hianyzo csomag nem kerult a naploba"
 
+    def test_startup_error_path_never_blocks(self, isolated_logging, tmp_path, monkeypatch):
+        """Az indulasi hibajelzes nem varhat felhasznaloi interakciora.
+
+        Egy modalis ablak (MessageBox) itt hatarozatlan ideig blokkolna, ha
+        nincs, aki elfogadja -- nem interaktiv munkamenetben ez a program
+        lathatatlan lefagyasa. Ez a teszt Windowson valosagosan kifogja: a CI
+        korabban pontosan ezen akadt meg, mindharom Windows jobon.
+        """
+        import time
+
+        from refreshswitcher import cli
+
+        monkeypatch.setattr(cli, "missing_packages", lambda required: ["pywin32"])
+        monkeypatch.setattr(cli.sys, "stdout", None)
+        monkeypatch.setattr(cli.sys, "stderr", None)
+        monkeypatch.setattr(cli.sys, "platform", "win32")  # a blokkolo ag felt
+
+        config = tmp_path / "config.json"
+        config.write_text("{}", encoding="utf-8")
+
+        started = time.monotonic()
+        assert cli.main(["--config", str(config), "tray"]) == cli.EXIT_MISSING_DEPENDENCY
+        assert time.monotonic() - started < 5.0, "az indulasi hibajelzes blokkolt"
+
     def test_print_to_a_none_stream_does_not_raise(self, monkeypatch):
         """A CPython print no-opol None stream eseten -- erre epitunk."""
         from refreshswitcher import cli
