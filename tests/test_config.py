@@ -112,6 +112,29 @@ class TestConfigWatcher:
         assert recovered is not None
         assert recovered.default_refresh_rate == 165
 
+    def test_detects_a_same_size_edit_with_an_unchanged_timestamp(self, tmp_path):
+        """A valos hiba: ``500`` -> ``240`` azonos hosszu, es az mtime is elakadhat.
+
+        A ``(mtime, meret)`` alapu valtozasdetektalas ilyenkor nem vett eszre
+        semmit, es a szerkesztett config sosem toltodott ujra. Windowson ez
+        rendszeresen elofordult, mert az NTFS idobelyeg-frissitese kesleltetett.
+        """
+        import os
+
+        path = write(tmp_path / "config.json", {"games": {"a.exe": 500}})
+        stamp = os.stat(path)
+        watcher = ConfigWatcher(path)
+        assert dict(watcher.reload_if_changed().games) == {"a.exe": 500}
+
+        write(path, {"games": {"a.exe": 240}})
+        # Az idobelyeget szandekosan visszaallitjuk az eredetire.
+        os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        assert os.stat(path).st_size == stamp.st_size, "a teszt elofeltetele: azonos meret"
+
+        reloaded = watcher.reload_if_changed()
+        assert dict(reloaded.games) == {"a.exe": 240}
+        assert watcher.generation == 2
+
     def test_returns_none_when_no_config_ever_loaded(self, tmp_path):
         watcher = ConfigWatcher(tmp_path / "nincs.json")
         assert watcher.reload_if_changed() is None
