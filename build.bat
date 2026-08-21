@@ -7,17 +7,24 @@ echo  RefreshSwitcher - Build
 echo ========================================
 echo.
 
-python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>nul
+REM Ha van virtualis kornyezet (telepites.bat), abban dolgozunk -- igy a
+REM build ugyanazokat a csomagverziokat hasznalja, mint a futo program.
+set "PY=python"
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+echo Hasznalt Python: %PY%
+echo.
+
+"%PY%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>nul
 if errorlevel 1 (
     echo HIBA: Python 3.10 vagy ujabb szukseges.
-    echo Toltsd le: https://www.python.org/downloads/
+    echo Futtasd eloszor a telepites.bat fajlt.
     pause
     exit /b 1
 )
 
 echo Fuggosegek ellenorzese...
-python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r requirements.txt pyinstaller
+"%PY%" -m pip install --quiet --upgrade pip
+"%PY%" -m pip install --quiet -r requirements.txt pyinstaller
 if errorlevel 1 (
     echo HIBA: Nem sikerult telepiteni a fuggosegeket!
     pause
@@ -25,7 +32,7 @@ if errorlevel 1 (
 )
 
 echo Tesztek futtatasa...
-python -m pytest -q
+"%PY%" -m pytest -q
 if errorlevel 1 (
     echo.
     echo FIGYELEM: a tesztek nem futottak le hibatlanul.
@@ -36,7 +43,7 @@ if errorlevel 1 (
 echo.
 echo PyInstaller build indul...
 rmdir /s /q build 2>nul
-python -m PyInstaller --noconfirm --clean RefreshSwitcher.spec
+"%PY%" -m PyInstaller --noconfirm --clean RefreshSwitcher.spec
 if errorlevel 1 (
     echo.
     echo HIBA: A build nem sikerult!

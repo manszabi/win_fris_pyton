@@ -211,7 +211,11 @@ class TrayApp:
         worker = threading.Thread(
             target=self._switcher.run,
             name="refresh-switcher",
-            daemon=False,  # szandekos: kilepeskor lefut a visszaallitas
+            # Daemon, de a _shutdown kifejezetten megvarja: normal esetben
+            # igy is lefut a frekvencia-visszaallitas, viszont ha a szal
+            # beragadna, nem tartja eletben a folyamatot lathatatlan
+            # "szellem" processzkent.
+            daemon=True,
         )
         self._worker = worker
         worker.start()
