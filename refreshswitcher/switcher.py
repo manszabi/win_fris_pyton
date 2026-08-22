@@ -16,6 +16,15 @@ Tervezesi dontesek a regi ``monitor_loop``-hoz kepest:
 * **Monitor-azonossag kovetese**: ha futas kozben kihuzol egy kijelzot, a
   sorszamok elcsusznak; ilyenkor a program figyelmeztet, es nem allitgatja
   csendben a rossz monitort.
+* **Nev szerinti kivalasztas rogzitese**: a Windows egy ebredes vagy
+  ujracsatlakozas utan atmenetileg ``Generic PnP Monitor``-kent jelenti a
+  kijelzot, ilyenkor a nevre allitott kivalasztas nem talalna semmit. A
+  korabban azonositott eszkozt ezert megjegyezzuk, es addig hasznaljuk, amig
+  csatlakozik.
+* **Ebresztes**: alvas/hibernalas utan (es kijelzovaltaskor) a tray kivulrol
+  ``wake()``-el jelez, igy a kovetkezo ellenorzes azonnal lefut, es a
+  hibaritkitas is nullazodik -- nem kell akar egy percet varni arra, hogy a
+  frekvencia helyrealljon.
 """
 
 from __future__ import annotations
@@ -88,6 +97,10 @@ class RefreshSwitcher:
         self._watcher = watcher
         self._listener = listener
         self._stop_event = threading.Event()
+        #: A varakozas megszakitasa: a leallas es az ebresztes is ezt allitja be.
+        self._interrupt = threading.Event()
+        #: Ebredes utan a kovetkezo korben eldobjuk a gyorsitotarazott dontesteket.
+        self._resync = False
         self._rate_cache = RefreshRateCache()
         self._state: SwitcherState | None = None
         self._state_lock = threading.Lock()
@@ -102,12 +115,28 @@ class RefreshSwitcher:
         self._fingerprint: tuple[int, int, int] | None = None
         #: Az elozo korben feloldott monitor azonossaga (kihuzas eszlelesehez).
         self._monitor_identity: tuple[str, str] | None = None
+        #: Nev szerinti kivalasztashoz: (a config szovege, a hozza talalt eszkoz).
+        self._pinned: tuple[str, str] | None = None
+        #: Igaz, ha epp a rogzitett eszkozre esunk vissza (csak egyszer naplozzuk).
+        self._pinned_fallback = False
 
     # -- vezerles ----------------------------------------------------------
 
     def stop(self) -> None:
         """Jelzi a ciklusnak, hogy alljon le. Tobbszor is hivhato."""
         self._stop_event.set()
+        self._interrupt.set()
+
+    def wake(self, reason: str = "") -> None:
+        """Azonnali ujraellenorzest ker (alvas utani ebredes, kijelzovaltas).
+
+        Szalbiztos es nem blokkolo: a hivo -- tipikusan a Windows
+        uzenethurokja -- csak jelez, minden munka a figyelociklusban tortenik.
+        """
+        self._resync = True
+        self._interrupt.set()
+        if reason:
+            logger.debug("Ebresztes: %s", reason)
 
     @property
     def stopping(self) -> bool:
@@ -138,14 +167,20 @@ class RefreshSwitcher:
         try:
             while not self._stop_event.is_set():
                 interval = self._tick()
-                if self._stop_event.wait(interval):
+                self._interrupt.wait(interval)
+                if self._stop_event.is_set():
                     break
+                # Az esetleg kozben erkezo ujabb ebresztest nem veszitjuk el:
+                # a torles utan azonnal kovetkezik egy teljes ellenorzes.
+                self._interrupt.clear()
         finally:
             self._restore_on_exit()
             logger.info("Figyelociklus leallt.")
 
     def _tick(self) -> float:
         """Egy ellenorzesi kor. A kovetkezo varakozas hosszat adja vissza."""
+        if self._resync:
+            self._apply_resync()
         config = self._watcher.reload_if_changed()
         if config is None:
             # Meg soha nem sikerult ervenyes configot betolteni.
@@ -159,8 +194,22 @@ class RefreshSwitcher:
             logger.exception("Varatlan hiba a figyelociklusban.")
             return self._handle_failure(config, str(exc))
 
+    def _apply_resync(self) -> None:
+        """Ebredes utani ujrakezdes: minden korabbi megfigyeles elavult.
+
+        Alvas/hibernalas alatt a kijelzo mas modra allhat, mas nevvel
+        jelentkezhet, es a driver mas frekvenciakat kinalhat, ezert a
+        gyorsitotarakat eldobjuk. A hibaritkitast is visszavesszuk: egy
+        ebredes uj helyzet, nem a korabbi hiba folytatasa.
+        """
+        self._resync = False
+        self._rate_cache.clear()
+        self._rejected.clear()
+        self._monitor_identity = None
+        self._consecutive_failures = min(self._consecutive_failures, 1)
+
     def _apply_config(self, config: Config) -> float:
-        monitor = resolve_monitor(config.monitor)
+        monitor = self._resolve_monitor(config)
         if monitor is None:
             # Tipikus ok: futas kozben kihuzott kijelzo.
             # Az elerheto monitorok felsorolasa a leghasznosabb resz a
@@ -254,24 +303,84 @@ class RefreshSwitcher:
         self._rejected[key] = message
         return False, message
 
+    def _resolve_monitor(self, config: Config) -> Monitor | None:
+        """Feloldja a configban megadott monitort, ebredes utan is.
+
+        Nev szerinti kivalasztasnal megjegyezzuk, melyik eszkoz felelt meg a
+        nevnek. A Windows ugyanis egy ebredes vagy ujracsatlakozas utan
+        atmenetileg -- neha veglegesen, amig a monitor INF-je be nem tolt --
+        ``Generic PnP Monitor``-kent jelenti a kijelzot; ilyenkor a nev nem
+        talal, es a program hasznalhatatlanna valna. Ha a korabban azonositott
+        eszkoz meg csatlakozik, tovabb hasznaljuk.
+        """
+        selector = config.monitor if isinstance(config.monitor, str) else None
+        monitor = resolve_monitor(config.monitor)
+
+        if monitor is not None:
+            if selector is not None:
+                if self._pinned_fallback:
+                    logger.warning(
+                        "A(z) %r monitor ujra a nevevel azonosithato (%s).",
+                        selector,
+                        monitor.friendly_name,
+                    )
+                self._pinned = (selector, monitor.device_name)
+            self._pinned_fallback = False
+            return monitor
+
+        if selector is None or self._pinned is None or self._pinned[0] != selector:
+            self._pinned_fallback = False
+            return None
+
+        fallback = resolve_monitor(self._pinned[1])
+        if fallback is None:
+            self._pinned_fallback = False
+            return None
+
+        if not self._pinned_fallback:
+            self._pinned_fallback = True
+            logger.warning(
+                "A(z) %r nev most nem talal (a Windows %r nevet jelent), ezert a "
+                "korabban hozza azonositott %s eszkozt hasznalom tovabb. Ha ez nem "
+                "a kivant kijelzo, ird at a 'monitor' beallitast eszkoznevre.",
+                selector,
+                fallback.friendly_name,
+                fallback.device_name,
+            )
+        return fallback
+
     def _check_monitor_identity(self, monitor: Monitor, config: Config) -> None:
         """Figyelmeztet, ha a kivalasztott sorszam mas fizikai kijelzore mutat."""
         identity = (monitor.device_name, monitor.friendly_name)
         previous = self._monitor_identity
         if previous is not None and previous != identity:
-            logger.warning(
-                "A kivalasztott monitor megvaltozott: %s -> %s. "
-                "Valoszinuleg kijelzot csatlakoztattal vagy huztal ki. "
-                "Rogzitett kivalasztashoz add meg a monitor nevet szovegkent a "
-                "'monitor' beallitasban (jelenleg: %r).",
-                previous[1],
-                monitor.friendly_name,
-                config.monitor,
-            )
+            if previous[0] != identity[0]:
+                # Mas eszkoz: a sorszam mashova mutat, mint az elozo korben.
+                logger.warning(
+                    "A kivalasztott monitor megvaltozott: %s -> %s. "
+                    "Valoszinuleg kijelzot csatlakoztattal vagy huztal ki. "
+                    "Rogzitett kivalasztashoz add meg a monitor nevet szovegkent a "
+                    "'monitor' beallitasban (jelenleg: %r).",
+                    previous[1],
+                    monitor.friendly_name,
+                    config.monitor,
+                )
+            else:
+                # Ugyanaz az eszkoz, mas nevvel: a Windows ebredes vagy
+                # driver-betoltes kozben elobb 'Generic PnP Monitor'-t jelent,
+                # majd a valodi nevet. Ez nem hiba, es nem is figyelmeztetes --
+                # kulonben minden ebredes ket sort irna a naploba.
+                logger.info(
+                    "A(z) %s monitor neve megvaltozott: %s -> %s",
+                    identity[0],
+                    previous[1],
+                    identity[1],
+                )
             # A regi kijelzore vonatkozo dontesek ervenyuket vesztik.
             self._rejected.clear()
             self._rate_cache.clear()
-            self._touched_device = None
+            if previous[0] != identity[0]:
+                self._touched_device = None
         self._monitor_identity = identity
 
     def _invalidate_if_changed(self, width: int, height: int) -> None:

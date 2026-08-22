@@ -16,6 +16,8 @@ frekvenciajat jatekok inditasakor es leallitasakor.
 - Kilepeskor visszaallitja az alapertelmezett frekvenciat
 - Egypeldany-vedelem: ket parhuzamos peldany nem tud egymas ellen dolgozni
 - Bejelentkezeskor automatikusan elindul (Task Scheduler)
+- **Takarekos**: a hattermunka ellenorzesenkent kb. ezredmasodpercekben merheto
+  (lasd az [Eroforrasigeny](#eroforrasigeny) reszt)
 
 ## Telepites
 
@@ -140,6 +142,30 @@ A jatek exe nevet a Feladatkezeloben (Task Manager) nezheted meg futas kozben.
 A nev **kis/nagybetu-fuggetlen**, es a `.exe` vegzodes elhagyhato — a `"cs2"`
 es a `"CS2.exe"` ugyanazt jelenti.
 
+## Eroforrasigeny
+
+A program **nem porgeti a processzort**: ket ellenorzes kozott alszik, es a
+felebredest esemeny szakitja meg (kilepes, rendszeresemeny), nem ciklikus
+ebredezes.
+
+Egy ellenorzesi kor munkaja:
+
+| Lepes | Koltseg |
+|-------|---------|
+| `config.json` beolvasasa | nehany szaz bajt a fajlrendszer gyorsitotarabol; a feldolgozas csak tenyleges valtozaskor fut |
+| Monitorok felsorolasa | nehany Win32 hivas |
+| Futo processzek atnezese | a processznevet **processzenkent egyszer** kerdezzuk le, es megjegyezzuk `(pid, inditasi ido)` szerint -- ez a legdragabb resz, es igy koronkent szinte ingyen van |
+| Tamogatott frekvenciak | felbontasonkent egyszer, utana gyorsitotarbol |
+
+Amivel a legtobbet tehetsz a fogyasztas ellen:
+
+- **`check_interval` novelese** (pl. `10`): aranyosan kevesebb kor.
+- **Rovid `games` lista**: ha ures, a program a processzeket sem nezi at.
+
+Memoria: a tray ikonok gyorsitotarazva vannak, de csak a tenylegesen
+megjelenitett szamokhoz (nehany kis kep), a processznev-gyorsitotar pedig
+minden korben ujraepul, igy a megszunt processzek nem maradnak benne.
+
 ## Viselkedes gyakori helyzetekben
 
 | Helyzet | Mi tortenik |
@@ -150,9 +176,11 @@ es a `"CS2.exe"` ugyanazt jelenti.
 | **Minden jatek bezarul** | Visszaall a `default_refresh_rate` ertekre. |
 | **A kert Hz-et nem tudja a monitor** | A program **nem** valtoztat semmit, a monitor a jelenlegi modjan marad. A tray ikon **borostyan** szinu lesz, a tooltip kiirja a tamogatott frekvenciakat, es a naploba is bekerul — **egyszer**, nem minden korben. A config javitasa utan magatol ujraprobalja. |
 | **A Windowsban alacsonyabb Hz van beallitva a kertnel** | `enforce_default: true` (alapertelmezett) eseten a program felemeli a `default_refresh_rate` ertekre. Ha kezzel akarod allitani a Hz-et, allitsd `enforce_default: false`-ra — ekkor csak jatek indulasakor nyul hozza. |
-| **Alvas / hibernalas utan a Windows visszaall 60 Hz-re** | A kovetkezo ellenorzeskor a program helyreallitja a helyes erteket. |
+| **Alvas / hibernalas utan a Windows visszaall 60 Hz-re** | A program a Windows energia-esemenyeire is felirakozik, ezert az ebredes *azonnal* ellenorzest valt ki -- nem kell megvarni a kovetkezo `check_interval`-t. Ilyenkor a gyorsitotarazott dontesek (tamogatott modok, korabbi hibak) is elavulnak, es ujra megkerdezzuk a drivert. |
+| **Ebredes utan a monitor meg nem jelentkezett be** | Par masodpercig nem talalhato: a program ujraprobal, es mivel az ebredes nullazza a hibaritkitast, a helyreallas masodperceken belul megtortenik. Az alvas es az ebredes idopontja is bekerul a naploba. |
 | **Kijelzo kihuzasa futas kozben** | Ha a kivalasztott monitor eltunt, a tray ikon **piros** lesz, es a naploba hiba kerul. A program **nem all le**, hanem egyre ritkabban ujraprobal (max. 60 mp), es visszadugaskor magatol helyreall. |
 | **Kijelzo kihuzasa elcsusztatja a sorszamokat** | A program eszreveszi, hogy a kivalasztott sorszam mas fizikai kijelzore mutat, es figyelmeztet a naploban. **Rogzitett kivalasztashoz add meg a monitor nevet** sorszam helyett. |
+| **A Windows `Generic PnP Monitor`-nak nevezi a kijelzot** | Ebredes vagy ujracsatlakozas utan a monitor neve atmenetileg ilyenre valtozik, amig a driver be nem tolti a monitor adatait. A nev szerinti kivalasztas ilyenkor sem esik szet: a program megjegyzi, melyik eszkozhoz tartozott a nev, es azt hasznalja tovabb (egyszer naplozza is). |
 | **A program osszeomlik vagy megszakad** | A frekvenciavaltas *dinamikus* (nem irodik a registrybe), igy egy ujrainditas visszahozza a Windows eredeti beallitasat. |
 | **Nincs `config.json`** | A program **letrehozza** az alapertelmezettet az exe mellett, es elindul. |
 | **A `config.json` hibas (elgepelt JSON)** | A tray ikon **piros** lesz, a tooltip kiirja a hiba helyet (sor/oszlop). A menubol megnyithato a config es a naplo; a javitas utan magatol ujratolt. |
@@ -172,6 +200,18 @@ majd a kiirt nevbol egy egyedi reszlet:
 
 ```json
 { "monitor": "AW2725DF" }
+```
+
+A nev kis/nagybetu-fuggetlen, es reszlet is eleg. Ha a Windows atmenetileg
+`Generic PnP Monitor`-kent jelenti a kijelzot (ez tipikusan alvas utan
+fordul elo), a program a nevhez korabban azonositott eszkozt hasznalja
+tovabb, es errol egyszer figyelmeztetest ir a naploba.
+
+Ha a monitor neve nalad allandoan ingadozik, add meg helyette az
+**eszkoznevet**, amit a `status` parancs zarojelben ir ki:
+
+```json
+{ "monitor": "\\\\.\\DISPLAY1" }
 ```
 
 ## Tray ikon
@@ -195,6 +235,10 @@ Ha az a mappa nem irhato (pl. `C:\Program Files`), automatikusan a
 - **Maximalis meret:** 512 KB + 2 backup fajl, osszesen ~1,5 MB
 - **Alapertelmezett szint:** `WARNING` — jatekvaltasok es hibak
 - **Kezeletlen kivetelek** (a hatterszalakban is) mindig a naploba kerulnek
+- **Alvas / ebredes** idopontja is bekerul, igy az ebredes utani hibaknak van elozmenye
+- A **`pystray` sajat hibai** (pl. a tray uzenethurok hibai) szinten ide kerulnek —
+  enelkul az "eltunt a tray ikon, es semmi nincs a naploban" tipusu hiba
+  kivizsgalhatatlan volna
 
 Reszletes naplo hibakeresehez:
 
@@ -235,6 +279,7 @@ igy a teljes kijelzo-logika Windows nelkul is ellenorizheto.
 | `refreshswitcher/games.py` | Futo jatekok felismerese, inditasi sorrend szerint |
 | `refreshswitcher/switcher.py` | A figyelo- es valtologika (allapotgep) |
 | `refreshswitcher/tray.py` | System tray felulet |
+| `refreshswitcher/syswake.py` | Alvas/ebredes es kijelzovaltas eszlelese (Windows uzenetek) |
 | `refreshswitcher/scheduler.py` | Task Scheduler integracio |
 | `refreshswitcher/single_instance.py` | Egypeldany-vedelem |
 | `refreshswitcher/logging_setup.py` | Naplozas + kezeletlen kivetelek elfogasa |
