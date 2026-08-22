@@ -13,6 +13,15 @@ Javitasok a korabbi valtozathoz kepest:
   kicsinyitessel -- eles kep minden DPI-skalazason.
 * Hiba eseten (rossz config, nem letezo monitor) az ikon **pirosra valt**, es
   a tooltip megmutatja az okot -- nem nemul el csendben.
+* A tooltip **minden agon** a Windows-limitre vagva megy at a pystray-nek.
+  Ez nem szepitgetes: a hosszu szoveg ValueError-t dob, a pystray viszont
+  *elobb eltarolja*, es csak utana probalja kiirni -- onnantol az ikon
+  allapota "megmergezodik". A kovetkezo ``WM_DISPLAYCHANGE`` uzenetnel (alvas,
+  ebredes, sajat frekvenciavaltas) a pystray leszedi az ikont a trayrol, es a
+  ValueError miatt mar nem tudja visszatenni: az ikon eltunik, a folyamat
+  pedig lathatatlanul tovabb fut.
+* A ``pystray`` uzenethurokja **nem nemulhat el eszrevetlenul**: ha vegzetes
+  hiba miatt leall, azt naplozzuk, es ujraepitjuk az ikont.
 """
 
 from __future__ import annotations
@@ -22,11 +31,13 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont
 
+from . import syswake
 from .config import ConfigWatcher
 from .dpi import enable_dpi_awareness, small_icon_size
 from .logging_setup import current_log_file
@@ -47,10 +58,27 @@ SUPERSAMPLE = 8
 #: A munkaszalra varakozas felso hatara kilepeskor (masodperc).
 SHUTDOWN_TIMEOUT = 8.0
 
+#: A ``NOTIFYICONDATAW.szTip`` mezo 128 karakteres, a lezaro nullaval egyutt --
+#: ennel hosszabb tooltipet a pystray ``ValueError``-ral utasit vissza.
+TOOLTIP_LIMIT = 127
+#: A menusorok hossza; itt nincs kemeny rendszerkorlat, csak olvashatosag.
+MENU_TEXT_LIMIT = 64
+#: Ennyiszer epitjuk ujra az ikont, ha a Windows uzenethurok varatlanul leall.
+MAX_ICON_RESTARTS = 3
+#: Varakozas ket ujraepites kozott (masodperc).
+ICON_RESTART_DELAY = 2.0
+
 #: A ket PIL betutipus-osztaly; az ImageDraw.text() mindkettot elfogadja.
 AnyFont = ImageFont.ImageFont | ImageFont.FreeTypeFont
 
 _FONT_CANDIDATES = ("arialbd.ttf", "seguisb.ttf", "segoeui.ttf", "arial.ttf", "DejaVuSans-Bold.ttf")
+
+
+def clamp(text: str, limit: int) -> str:
+    """A szoveget a megadott hosszra vagja, jelezve, hogy folytatodna."""
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 
 def _load_font(size: int) -> AnyFont:
@@ -118,6 +146,8 @@ class TrayApp:
         self._worker: threading.Thread | None = None
         self._state: SwitcherState | None = None
         self._icon_cache: dict[tuple[str, tuple[int, int, int, int], int], Image.Image] = {}
+        #: Igaz, ha a felhasznalo kert kilepest -- csak igy szabad kilepni.
+        self._quit_requested = False
 
     # -- megjelenites ------------------------------------------------------
 
@@ -141,28 +171,34 @@ class TrayApp:
         return cached
 
     def _tooltip_for(self, state: SwitcherState | None) -> str:
+        """A tray tooltip szovege -- garantaltan a Windows-limiten belul.
+
+        A vagas egyetlen, kozos helyen tortenik: egyetlen ki nem vagott ag is
+        eleg ahhoz, hogy a hibauzenet (ami a monitorok felsorolasat is
+        tartalmazza) hasznalhatatlanna tegye az ikont.
+        """
         if state is None:
-            return f"{APP_TITLE}\nIndulas..."
-        if state.error is not None:
-            return f"{APP_TITLE}\nHiba: {state.error}"
-        line = f"{state.refresh_rate} Hz"
-        if state.game_name:
-            line += f" - {state.game_name}"
-        if state.monitor is not None:
-            line += f"\n{state.monitor.friendly_name}"
-        if state.warning is not None:
-            line += f"\nFigyelem: {state.warning}"
-        # A Windows tray tooltip 127 karakterig jelenik meg.
-        return f"{APP_TITLE}\n{line}"[:127]
+            line = "Indulas..."
+        elif state.error is not None:
+            line = f"Hiba: {state.error}"
+        else:
+            line = f"{state.refresh_rate} Hz"
+            if state.game_name:
+                line += f" - {state.game_name}"
+            if state.monitor is not None:
+                line += f"\n{state.monitor.friendly_name}"
+            if state.warning is not None:
+                line += f"\nFigyelem: {state.warning}"
+        return clamp(f"{APP_TITLE}\n{line}", TOOLTIP_LIMIT)
 
     def _status_text(self, _item: object = None) -> str:
         state = self._state
         if state is None:
             return "Indulas..."
         if state.error is not None:
-            return f"Hiba: {state.error}"[:64]
+            return clamp(f"Hiba: {state.error}", MENU_TEXT_LIMIT)
         if state.warning is not None:
-            return f"{state.refresh_rate} Hz - {state.warning}"[:64]
+            return clamp(f"{state.refresh_rate} Hz - {state.warning}", MENU_TEXT_LIMIT)
         if state.game_name:
             return f"{state.refresh_rate} Hz - {state.game_name}"
         return f"{state.refresh_rate} Hz"
@@ -171,7 +207,7 @@ class TrayApp:
         state = self._state
         if state is None or state.monitor is None:
             return "Monitor: ismeretlen"
-        return f"Monitor: {state.monitor.friendly_name}"[:64]
+        return clamp(f"Monitor: {state.monitor.friendly_name}", MENU_TEXT_LIMIT)
 
     # -- esemenyek ---------------------------------------------------------
 
@@ -187,6 +223,22 @@ class TrayApp:
             icon.update_menu()
         except Exception:  # a UI hibaja nem allithatja meg a switchert
             logger.warning("Nem sikerult frissiteni a tray ikont.", exc_info=True)
+            self._restore_icon(icon)
+
+    def _restore_icon(self, icon: pystray.Icon) -> None:
+        """Ujra kiteszi az ikont egy sikertelen frissites utan.
+
+        A pystray a cimet az ervenyesites *elott* tarolja el, ezert egy hibas
+        ertek benne ragad, es utana mar a trayre visszatetel is elszall. Eloszor
+        tehat egy biztosan rovid cimet adunk neki, es csak azutan tesszuk ki
+        ujra az ikont.
+        """
+        try:
+            icon.title = APP_TITLE
+            icon.visible = False
+            icon.visible = True
+        except Exception:
+            logger.warning("Nem sikerult ujra kitenni a tray ikont.", exc_info=True)
 
     def _on_open_config(self, _icon: object = None, _item: object = None) -> None:
         _open_in_explorer(self._watcher.path)
@@ -201,6 +253,7 @@ class TrayApp:
 
     def _on_quit(self, icon: pystray.Icon, _item: object = None) -> None:
         logger.info("Kilepes a tray menubol.")
+        self._quit_requested = True
         self._switcher.stop()
         icon.visible = False
         icon.stop()
@@ -208,6 +261,17 @@ class TrayApp:
     def _setup(self, icon: pystray.Icon) -> None:
         """A pystray hivja, amint az ikon lathato -- itt indul a munkaszal."""
         icon.visible = True
+        # Alvas/ebredes es kijelzovaltas eszlelese: ehhez kell a mar felallt
+        # ablak, ezert csak most iratkozunk fel.
+        syswake.attach(icon, self._switcher.wake)
+        # Az ikon ujraepitesekor a munkaszal mar fut: nem inditunk masodikat.
+        worker = self._worker
+        if worker is not None and worker.is_alive():
+            state = self._state
+            if state is not None:
+                # Az ujraepitett ikon azonnal a valos allapotot mutassa.
+                self._on_state(state)
+            return
         worker = threading.Thread(
             target=self._switcher.run,
             name="refresh-switcher",
@@ -235,21 +299,51 @@ class TrayApp:
 
     def run(self) -> int:
         enable_dpi_awareness()
-        self._icon = pystray.Icon(
-            "RefreshSwitcher",
-            icon=self._icon_for(None),
-            title=self._tooltip_for(None),
-            menu=self._build_menu(),
-        )
         try:
+            for attempt in range(1 + MAX_ICON_RESTARTS):
+                if self._run_icon():
+                    return 0
+                if attempt == MAX_ICON_RESTARTS:
+                    break
+                # Ide csak akkor jutunk, ha a Windows uzenethurok kilepesi
+                # keres nelkul allt le. A switcher ilyenkor is dolgozik tovabb,
+                # csak a tray ikon tunt el -- ezt epitjuk ujra.
+                logger.error(
+                    "A tray uzenethurok varatlanul leallt; ujraepites (%d/%d).",
+                    attempt + 1,
+                    MAX_ICON_RESTARTS,
+                )
+                time.sleep(ICON_RESTART_DELAY)
+            logger.error("A tray ikont nem sikerult ujraepiteni; a program kilep.")
+            return 1
+        finally:
+            self._shutdown()
+
+    def _run_icon(self) -> bool:
+        """Egy teljes ikon-eletciklus. ``True``, ha rendezett kilepes tortent."""
+        try:
+            self._icon = pystray.Icon(
+                "RefreshSwitcher",
+                icon=self._icon_for(self._state),
+                title=self._tooltip_for(self._state),
+                menu=self._build_menu(),
+            )
             self._icon.run(setup=self._setup)
         except KeyboardInterrupt:  # pragma: no cover
             logger.info("Megszakitas (Ctrl+C).")
+            return True
+        except Exception:
+            # A pystray sajat uzenethurokja elkapja a sajat hibait, ide csak a
+            # felallitas kozbeni hiba juthat el -- naploznunk viszont kell,
+            # kulonben pythonw.exe alatt nyomtalanul tunne el a program.
+            logger.exception("A tray ikon vegzetes hibaval leallt.")
+            return False
         finally:
-            self._shutdown()
-        return 0
+            self._icon = None
+        return self._quit_requested
 
     def _shutdown(self) -> None:
+        self._quit_requested = True
         self._switcher.stop()
         worker = self._worker
         if worker is not None and worker.is_alive():

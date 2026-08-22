@@ -140,19 +140,40 @@ def win32(displays, monkeypatch):
         sys.modules.pop(name, None)
 
 
-@pytest.fixture
-def fake_processes(monkeypatch):
-    """Beallithato processzlista a ``games`` modulhoz."""
-    import refreshswitcher.games as games_module
+class FakeProcess:
+    """A ``psutil.Process`` hasznalt reszenek szimulacioja.
 
-    names: list[str] = []
+    A nevet -- ahogy a psutil is -- kulon lekerdezes adja vissza, nem a
+    ``process_iter`` altal feltoltott ``info`` szotar; a hivasokat szamoljuk,
+    igy tesztelheto, hogy a nev-gyorsitotar tenyleg mukodik.
+    """
 
-    class _Proc:
-        def __init__(self, name):
-            self.info = {"name": name}
+    def __init__(self, pid, name, started=0.0, name_calls=None):
+        self.pid = pid
+        self._name = name
+        self._name_calls = name_calls if name_calls is not None else []
+        self.info = {"pid": pid, "create_time": started}
+
+    def name(self):
+        self._name_calls.append(self.pid)
+        return self._name
+
+
+def fake_process_iter(entries, name_calls):
+    """``psutil.process_iter`` helyettesitese ``(pid, nev, inditasi ido)`` listabol."""
 
     def _iter(attrs=None):
-        return [_Proc(name) for name in names]
+        return [FakeProcess(pid, name, started, name_calls) for pid, name, started in entries]
 
-    monkeypatch.setattr(games_module.psutil, "process_iter", _iter)
-    return names
+    return _iter
+
+
+@pytest.fixture
+def fake_processes(monkeypatch):
+    """Beallithato ``(pid, nev, inditasi ido)`` lista a ``games`` modulhoz."""
+    import refreshswitcher.games as games_module
+
+    games_module.reset_name_cache()
+    entries: list[tuple[int, str, float]] = []
+    monkeypatch.setattr(games_module.psutil, "process_iter", fake_process_iter(entries, []))
+    return entries

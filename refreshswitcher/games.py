@@ -7,6 +7,16 @@ a sorban kovetkezo (masodikkent inditott) jatek beallitasa lep ervenybe.
 Ezt a processz letrehozasi ideje (``create_time``) donti el, nem a felismeres
 sorrendje -- igy az eredmeny akkor is helyes, ha a program *kozben* indul el,
 amikor mar tobb jatek fut.
+
+**Processzornevek gyorsitotara.** Ez a modul fut a leggyakrabban (alapbeallitas
+szerint 5 masodpercenkent), ezert itt szamit a legtobbet a takarekossag. A
+``psutil`` a processznevet Windowson ``OpenProcess`` +
+``QueryFullProcessImageName`` parossal szerzi meg: egy atlagos gepen 300+ futo
+processz eseten ez koronkent 300+ rendszerhivas, gyakorlatilag mindig ugyanazzal
+az eredmennyel. A nevet ezert processzenkent **egyszer** kerdezzuk le, es a
+``(pid, inditasi ido)`` kulcs alatt megjegyezzuk -- a kulcs masodik fele vedi ki
+a pid-ujrahasznositast. Igy koronkent csak az *ujonnan indult* processzek nevet
+kell lekerdezni.
 """
 
 from __future__ import annotations
@@ -21,6 +31,40 @@ logger = logging.getLogger(__name__)
 
 #: Ha a processz inditasi ideje nem kerdezheto le, a sor vegere kerul.
 _UNKNOWN_START = float("inf")
+
+
+class _NameCache:
+    """``(pid, inditasi ido)`` -> kisbetus processznev.
+
+    Minden bejaras egy *uj* szotarat epit fel, es a vegen azt teszi a regi
+    helyere: igy a megszunt processzek bejegyzesei maguktol kiesnek, es a
+    gyorsitotar nem nohet a vegtelensegig.
+    """
+
+    __slots__ = ("_names",)
+
+    def __init__(self) -> None:
+        self._names: dict[tuple[int, float | None], str] = {}
+
+    def __len__(self) -> int:
+        return len(self._names)
+
+    def get(self, key: tuple[int, float | None]) -> str | None:
+        return self._names.get(key)
+
+    def replace(self, names: dict[tuple[int, float | None], str]) -> None:
+        self._names = names
+
+    def clear(self) -> None:
+        self._names = {}
+
+
+_name_cache = _NameCache()
+
+
+def reset_name_cache() -> None:
+    """Uriti a processznev-gyorsitotarat (tesztekhez es diagnosztikahoz)."""
+    _name_cache.clear()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,46 +90,58 @@ class GameMatch:
 def iter_running_games(games: Mapping[str, int]) -> list[GameMatch]:
     """Az osszes futo ismert jatek, inditasi ido szerint novekvo sorrendben."""
     if not games:
+        # Nincs mit keresni: a gyorsitotarat sem tartjuk fenn feleslegesen.
+        _name_cache.clear()
         return []
 
+    current: dict[tuple[int, float | None], str] = {}
     matches: list[GameMatch] = []
-    for proc in psutil.process_iter(["pid", "name", "create_time"]):
+
+    # Csak a pid-et es az inditasi idot kerjuk el: mindketto olcso (a psutil a
+    # sajat Process-peldanyaiban gyorsitotarazza), a *nevet* viszont csak akkor
+    # kerdezzuk le, ha meg nem ismerjuk.
+    for proc in psutil.process_iter(["pid", "create_time"]):
         try:
             info = proc.info
-            raw_name = info.get("name")
-        except (psutil.Error, AttributeError):
+            pid = int(info["pid"])
+            started_at = info.get("create_time")
+            key = (pid, started_at)
+            name = _name_cache.get(key)
+            if name is None:
+                raw_name = proc.name()
+                name = raw_name.lower() if raw_name else ""
+        except (psutil.Error, AttributeError, KeyError, TypeError, ValueError):
             # A processz kozben meghalt, vagy nincs jogosultsagunk hozza.
             continue
-        if not raw_name:
-            continue
-        name = raw_name.lower()
+
+        current[key] = name
         rate = games.get(name)
         if rate is None:
             continue
 
-        started_at = info.get("create_time")
         matches.append(
             GameMatch(
                 process_name=name,
                 refresh_rate=rate,
-                pid=int(info.get("pid") or 0),
+                pid=pid,
                 started_at=float(started_at) if started_at is not None else _UNKNOWN_START,
             )
         )
 
-    matches.sort(key=lambda match: match.priority_key)
+    _name_cache.replace(current)
+
+    if len(matches) > 1:
+        matches.sort(key=lambda match: match.priority_key)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Tobb jatek fut (%s); az eloszor inditott ervenyes: %s",
+                ", ".join(match.process_name for match in matches),
+                matches[0].process_name,
+            )
     return matches
 
 
 def find_active_game(games: Mapping[str, int]) -> GameMatch | None:
     """Az *eloszor elinditott* futo jatek, vagy ``None``, ha egyik sem fut."""
     running = iter_running_games(games)
-    if not running:
-        return None
-    if len(running) > 1:
-        logger.debug(
-            "Tobb jatek fut (%s); az eloszor inditott ervenyes: %s",
-            ", ".join(match.process_name for match in running),
-            running[0].process_name,
-        )
-    return running[0]
+    return running[0] if running else None

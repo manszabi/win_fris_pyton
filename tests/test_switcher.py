@@ -17,7 +17,7 @@ import json
 import pytest
 
 from refreshswitcher.config import ConfigWatcher
-from tests.conftest import FakeDisplay
+from tests.conftest import FakeDisplay, fake_process_iter
 
 
 @pytest.fixture
@@ -52,13 +52,9 @@ def processes(monkeypatch):
     """Beallithato ``(pid, nev, inditasi_ido)`` lista."""
     import refreshswitcher.games as games_module
 
+    games_module.reset_name_cache()
     entries: list[tuple[int, str, float]] = []
-
-    class _Proc:
-        def __init__(self, pid, name, started):
-            self.info = {"pid": pid, "name": name, "create_time": started}
-
-    monkeypatch.setattr(games_module.psutil, "process_iter", lambda attrs=None: [_Proc(*e) for e in entries])
+    monkeypatch.setattr(games_module.psutil, "process_iter", fake_process_iter(entries, []))
     return entries
 
 
@@ -379,3 +375,121 @@ def test_unplugged_monitor_does_not_spam_the_log(make_switcher, displays, caplog
             switcher._tick()
     errors = [r for r in caplog.records if r.levelname in {"ERROR", "WARNING"}]
     assert len(errors) <= 2, f"tul sok naplobejegyzes: {[r.message for r in errors]}"
+
+
+# --- alvas / ebredes -----------------------------------------------------------
+
+
+def test_wake_shortens_the_backoff_after_a_resume(make_switcher, displays):
+    """Ebredeskor nem varhatunk egy percet arra, hogy a kepernyo helyrealljon."""
+    switcher, _ = make_switcher(monitor=2)
+    displays.pop()  # a masodik kijelzo (meg) nem jelentkezett be
+    for _ in range(8):
+        switcher._tick()
+    assert switcher._tick() > 1.0, "tartos hiba eseten ritkitani kell"
+
+    switcher.wake("ebredes")
+    assert switcher._tick() <= 1.0, "ebredes utan azonnal ujra kell probalni"
+
+
+def test_wake_drops_the_cached_decisions(make_switcher, processes):
+    """Alvas alatt a driver mas modokat kinalhat, mint elotte: ujra megkerdezzuk."""
+    import refreshswitcher.display as display_module
+
+    switcher, states = make_switcher(games={"a.exe": 500})
+    processes.append((1, "a.exe", 100.0))
+    switcher._tick()
+    assert states[-1].warning is not None
+    assert switcher._rejected, "az elutasitast megjegyeztuk"
+
+    before = display_module.win32api.enum_settings_calls
+    switcher._tick()
+    quiet_round = display_module.win32api.enum_settings_calls - before
+
+    before = display_module.win32api.enum_settings_calls
+    switcher.wake("ebredes")
+    switcher._tick()
+    after_wake = display_module.win32api.enum_settings_calls - before
+    assert after_wake > quiet_round, "ebredes utan ujra vegig kell kerdezni a modokat"
+
+
+def test_wake_interrupts_the_waiting_loop(make_switcher):
+    import threading
+
+    switcher, _ = make_switcher(check_interval=3600)
+    ticks = threading.Semaphore(0)
+    original = switcher._tick
+
+    def _counting_tick():
+        result = original()
+        ticks.release()
+        return result
+
+    switcher._tick = _counting_tick
+    thread = threading.Thread(target=switcher.run)
+    thread.start()
+    try:
+        assert ticks.acquire(timeout=5), "az elso kornek azonnal le kell futnia"
+        switcher.wake("ebredes")
+        assert ticks.acquire(timeout=5), "az ebresztes nem varhatja meg a check_interval-t"
+    finally:
+        switcher.stop()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+
+
+# --- nev szerinti kivalasztas ebredes utan -------------------------------------
+
+
+def test_named_monitor_survives_a_generic_windows_name(make_switcher, displays):
+    """Ebredes utan a Windows atmenetileg 'Generic PnP Monitor'-t jelent.
+
+    A naploban ez a hiba latszott: a nevre allitott kivalasztas nem talalt
+    semmit, es a program hasznalhatatlanna valt.
+    """
+    switcher, states = make_switcher(monitor="Masodik monitor", default_refresh_rate=75)
+    switcher._tick()
+    assert displays[1].frequency == 75
+
+    displays[1].friendly_name = "Generic PnP Monitor"
+    displays[1].frequency = 60  # a Windows visszaallitotta ebredeskor
+    switcher._tick()
+
+    assert states[-1].error is None, "a kijelzo ott van, csak mas nevet mond"
+    assert displays[1].frequency == 75
+
+
+def test_generic_name_fallback_is_logged_once(make_switcher, displays, caplog):
+    switcher, _ = make_switcher(monitor="Masodik monitor", default_refresh_rate=75)
+    switcher._tick()
+    displays[1].friendly_name = "Generic PnP Monitor"
+
+    with caplog.at_level("WARNING", logger="refreshswitcher.switcher"):
+        for _ in range(5):
+            switcher._tick()
+        fallback_warnings = [r for r in caplog.records if "nem talal" in r.message]
+        assert len(fallback_warnings) == 1, "korrol korre nem ismetelheto"
+
+        displays[1].friendly_name = "Masodik monitor"  # a driver betoltott
+        switcher._tick()
+    assert any("ujra a nevevel" in r.message for r in caplog.records)
+
+
+def test_unplugged_named_monitor_still_reports_an_error(make_switcher, displays):
+    """A rogzites nem fedheti el, ha a kijelzo tenylegesen eltunt."""
+    switcher, states = make_switcher(monitor="Masodik monitor", default_refresh_rate=75)
+    switcher._tick()
+    displays.pop()  # kihuzzuk
+    switcher._tick()
+    assert states[-1].error is not None
+
+
+def test_renamed_monitor_is_not_reported_as_a_different_display(make_switcher, displays, caplog):
+    """Ugyanaz az eszkoz uj nevvel nem 'monitorcsere' -- ez spammelte a naplot."""
+    switcher, _ = make_switcher(monitor=1)
+    switcher._tick()
+
+    displays[0].friendly_name = "Generic PnP Monitor"
+    with caplog.at_level("WARNING", logger="refreshswitcher.switcher"):
+        switcher._tick()
+    assert not [r for r in caplog.records if "megvaltozott" in r.message]

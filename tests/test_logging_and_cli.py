@@ -19,10 +19,13 @@ def isolated_logging(tmp_path, monkeypatch):
     monkeypatch.setenv("REFRESHSWITCHER_LOG", str(tmp_path / "log" / "app.log"))
     module = importlib.reload(logging_setup)
     yield module
-    logger = logging.getLogger("refreshswitcher")
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
-        handler.close()
+    # A kulso csomagok naplozoi is a mi kezeloinket kapjak meg -- ha ott
+    # maradnanak, a kovetkezo teszt egy mar lezart fajlba irna.
+    for name in ("refreshswitcher", *module._THIRD_PARTY_LOGGERS):
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 def test_log_file_is_created_and_written(isolated_logging, tmp_path):
@@ -33,6 +36,24 @@ def test_log_file_is_created_and_written(isolated_logging, tmp_path):
     for handler in logging.getLogger("refreshswitcher").handlers:
         handler.flush()
     assert "proba uzenet" in path.read_text(encoding="utf-8")
+
+
+def test_third_party_errors_land_in_the_log(isolated_logging, tmp_path):
+    """A pystray a sajat naplozojara irja az uzenethurok hibait.
+
+    Enelkul a "eltunt a tray ikon, es semmi nincs a naploban" hibat nem lehet
+    kivizsgalni.
+    """
+    path = isolated_logging.setup_logging(logging.WARNING)
+    logging.getLogger("pystray._win32").error("An error occurred in the main loop")
+    for handler in logging.getLogger("pystray").handlers:
+        handler.flush()
+    assert "An error occurred in the main loop" in path.read_text(encoding="utf-8")
+
+
+def test_third_party_loggers_do_not_reach_the_root_logger(isolated_logging):
+    isolated_logging.setup_logging(logging.WARNING)
+    assert logging.getLogger("pystray").propagate is False
 
 
 def test_logger_does_not_propagate_to_root(isolated_logging):
